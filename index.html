@@ -208,25 +208,28 @@
             const [desc, setDesc] = useState('');
             const [showSalary, setShowSalary] = useState(false);
             const [errorMsg, setErrorMsg] = useState('');
+            const [showWithdraw, setShowWithdraw] = useState(false);
+            const [withdrawAmount, setWithdrawAmount] = useState('');
+            const [withdrawNote, setWithdrawNote] = useState('');
+            const [showAddDmg, setShowAddDmg] = useState(false);
+            const [newDmgDesc, setNewDmgDesc] = useState('');
 
-            const requestWithdrawal = () => {
-                const amount = prompt("مبلغ المسحوب:");
-                if (!amount || isNaN(amount) || Number(amount) <= 0) return;
-                const note = prompt("سبب السحب:") || "مسحوب";
-                const amt = -Math.abs(Number(amount));
+            const confirmWithdrawal = () => {
+                if (!withdrawAmount || isNaN(withdrawAmount) || Number(withdrawAmount) <= 0) return;
+                const amt = -Math.abs(Number(withdrawAmount));
+                const note = withdrawNote || "مسحوب";
                 onUpdate(user.id, {
                     currentBalance: (Number(user.currentBalance)||0) + amt,
                     transactions: [{date: new Date().toLocaleString(), type:'out', amount: amt, note: `مسحوب: ${note}`}, ...(user.transactions||[])]
                 });
-                alert("تم تسجيل المسحوب وخصمه من الرصيد");
+                setShowWithdraw(false); setWithdrawAmount(''); setWithdrawNote('');
             };
 
-            const addDeduction = () => {
-                const d = prompt("وصف الخصم / التلفيات:");
-                if (!d) return;
-                const dmgs = [{date: new Date().toLocaleString(), desc: d, status: null}, ...(user.damages||[])];
+            const confirmAddDeduction = () => {
+                if (!newDmgDesc) return;
+                const dmgs = [{date: new Date().toLocaleString(), desc: newDmgDesc, status: null}, ...(user.damages||[])];
                 onUpdate(user.id, { damages: dmgs });
-                alert("تم إرسال الخصم للمدير للتسعير");
+                setShowAddDmg(false); setNewDmgDesc('');
             };
 
             const handleAction = async () => {
@@ -345,8 +348,8 @@
                         {tab === 'wallet' && (
                             <div className="text-left space-y-4">
                                 <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={requestWithdrawal} className="bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-sm border border-orange-200">مسحوبات</button>
-                                    <button onClick={addDeduction} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-sm border border-red-200">إضافة خصم</button>
+                                    <button onClick={()=>setShowWithdraw(true)} className="bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-sm border border-orange-200">مسحوبات</button>
+                                    <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-sm border border-red-200">إضافة خصم</button>
                                 </div>
                                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
                                     <div><p className="text-xs text-slate-400 mb-1">الراتب الأساسي</p><p className="font-bold text-lg text-slate-800 tracking-wider">{showSalary ? `${(user.salary||0).toFixed(0)} ج.م` : '******'}</p></div>
@@ -399,6 +402,33 @@
                                 ) : (
                                     <div className="animate-fade-in"><textarea className="w-full border p-3 rounded-xl text-sm h-24 mb-4" placeholder="ما هي التلفيات؟" value={desc} onChange={e=>setDesc(e.target.value)}></textarea><button onClick={confirmOut} disabled={!desc} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold disabled:opacity-50">تأكيد الانصراف</button></div>
                                 )}
+                            </div>
+                        </div>
+                    )}
+
+                    {showWithdraw && (
+                        <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50 p-4">
+                            <div className="bg-white w-full max-w-xs p-6 rounded-2xl text-center">
+                                <h3 className="font-bold mb-4 text-lg">مسحوبات</h3>
+                                <input type="number" placeholder="المبلغ" value={withdrawAmount} onChange={e=>setWithdrawAmount(e.target.value)} className="w-full border p-3 rounded-xl text-center text-lg mb-3" />
+                                <input type="text" placeholder="السبب (اختياري)" value={withdrawNote} onChange={e=>setWithdrawNote(e.target.value)} className="w-full border p-3 rounded-xl text-center mb-4" />
+                                <div className="flex gap-2">
+                                    <button onClick={()=>{setShowWithdraw(false); setWithdrawAmount(''); setWithdrawNote('');}} className="flex-1 bg-slate-100 py-3 rounded-xl font-bold">إلغاء</button>
+                                    <button onClick={confirmWithdrawal} className="flex-1 bg-orange-500 text-white py-3 rounded-xl font-bold">تأكيد</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showAddDmg && (
+                        <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50 p-4">
+                            <div className="bg-white w-full max-w-xs p-6 rounded-2xl text-center">
+                                <h3 className="font-bold mb-4 text-lg">إضافة خصم</h3>
+                                <textarea placeholder="وصف الخصم أو التلفيات" value={newDmgDesc} onChange={e=>setNewDmgDesc(e.target.value)} className="w-full border p-3 rounded-xl text-sm h-24 mb-4"></textarea>
+                                <div className="flex gap-2">
+                                    <button onClick={()=>{setShowAddDmg(false); setNewDmgDesc('');}} className="flex-1 bg-slate-100 py-3 rounded-xl font-bold">إلغاء</button>
+                                    <button onClick={confirmAddDeduction} disabled={!newDmgDesc} className="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold disabled:opacity-50">إرسال</button>
+                                </div>
                             </div>
                         </div>
                     )}
