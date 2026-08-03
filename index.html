@@ -347,9 +347,15 @@
 
                         {tab === 'wallet' && (
                             <div className="text-left space-y-4">
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button onClick={()=>setShowWithdraw(true)} className="bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-sm border border-orange-200">مسحوبات</button>
-                                    <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-sm border border-red-200">إضافة خصم</button>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={()=>setShowWithdraw(true)} className="bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs border border-orange-200">مسحوبات</button>
+                                    <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-xs border border-red-200">إضافة خصم</button>
+                                    <button onClick={()=>{
+                                        const today = new Date().toLocaleDateString();
+                                        if((user.overtimeRequests||[]).some(r => r.date === today && !r.status)) return;
+                                        const reqs = [{date: today, status: null}, ...(user.overtimeRequests||[])];
+                                        onUpdate(user.id, {overtimeRequests: reqs});
+                                    }} className="bg-purple-50 text-purple-700 py-3 rounded-xl font-bold text-xs border border-purple-200">Over time</button>
                                 </div>
                                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
                                     <div><p className="text-xs text-slate-400 mb-1">الراتب الأساسي</p><p className="font-bold text-lg text-slate-800 tracking-wider">{showSalary ? `${(user.salary||0).toFixed(0)} ج.م` : '******'}</p></div>
@@ -481,7 +487,7 @@
                 onAdd({
                     id: Date.now().toString(), role: 'employee',
                     name: newUser.name, password: newUser.password, salary: parseFloat(newUser.salary), dailyRate: rate, targetHours: parseFloat(newUser.hours), photo: newUser.photo,
-                    currentBalance: 0, isCheckedIn: false, lateCount: 0, earlyLeaveCount: 0, transactions: [], notifications: [], damages: []
+                    currentBalance: 0, isCheckedIn: false, lateCount: 0, earlyLeaveCount: 0, transactions: [], notifications: [], damages: [], overtimeRequests: []
                 });
                 setShowAdd(false); setNewUser({name:'', password:'', salary:'', hours: DEFAULT_WORK_HOURS, photo: ''});
             };
@@ -589,9 +595,21 @@
                                 {emp.damages?.map((d, i) => !d.status && (
                                     <div key={i} className="bg-red-50 p-2 mb-2 rounded flex justify-between items-center border border-red-100"><span className="text-xs text-red-600 font-bold">⚠️ {d.desc}</span><div className="flex gap-1"><input type="number" placeholder="سعر" className="w-16 p-1 text-xs border rounded" onChange={e => setDmgCost({...dmgCost, [i]: e.target.value})} /><button onClick={() => resolveDamage(emp, i)} className="bg-red-600 text-white px-2 py-1 text-xs rounded">خصم</button></div></div>
                                 ))}
+                                {emp.overtimeRequests?.map((r, i) => !r.status && (
+                                    <div key={i} className="bg-purple-50 p-2 mb-2 rounded flex justify-between items-center border border-purple-100">
+                                        <span className="text-xs text-purple-700 font-bold">Overtime: {r.date}</span>
+                                        <button onClick={()=>{
+                                            const reqs = [...(emp.overtimeRequests||[])];
+                                            reqs[i].status = 'approved';
+                                            const extra = emp.dailyRate || 0;
+                                            addTransaction(emp, extra, `Overtime: ${r.date}`);
+                                            onUpdate(emp.id, {overtimeRequests: reqs});
+                                        }} className="bg-purple-600 text-white px-2 py-1 text-xs rounded">موافقة</button>
+                                    </div>
+                                ))}
 
                                 <div className="grid grid-cols-2 gap-2 mt-2">
-                                    <button onClick={()=>addTransaction(emp, -(emp.dailyRate/2), "خصم نصف يوم")} className="text-xs bg-red-50 text-red-600 py-2 rounded font-bold">خصم نصف يوم</button>
+                                    <button onClick={()=>{ if(confirm("تأكيد خصم نصف يوم؟")) addTransaction(emp, -(emp.dailyRate/2 || 0), "خصم نصف يوم"); }} className="text-xs bg-red-50 text-red-600 py-2 rounded font-bold">خصم نصف يوم</button>
                                     <button onClick={()=>{const v=prompt("أيام:"); if(v) addTransaction(emp, parseFloat(v)*emp.dailyRate, `إضافة ${v} أيام`)}} className="text-xs bg-blue-50 text-blue-600 py-2 rounded font-bold">+ أيام عمل</button>
                                     <button onClick={()=>{const v=prompt("حافز:"); if(v) addTransaction(emp, parseFloat(v), "حافز")}} className="text-xs bg-green-50 text-green-600 py-2 rounded font-bold">حافز</button>
                                     <button onClick={()=>{const d=prompt("وصف الخصم:"); if(d){const cost=prompt("السعر:"); if(cost){const dmgs=[{date:new Date().toLocaleString(),desc:d,status:'resolved',cost:parseFloat(cost)},...(emp.damages||[])]; addTransaction(emp, -parseFloat(cost), `خصم: ${d}`); onUpdate(emp.id,{damages:dmgs});}}}} className="text-xs bg-red-100 text-red-700 py-2 rounded font-bold">+ خصم جديد</button>
