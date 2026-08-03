@@ -285,7 +285,16 @@
                             updates.lateCount = (Number(user.lateCount)||0) + 1;
                         }
                         
-                        alert(`شكراً أتمنى لك اليوم يوم سعيد .. ${user.name} 😊`);
+                        const msgs = [
+                            `أتمنى لك يوم سعيد يا ${user.name} 🌟`,
+                            `يا بطل ${user.name}، يومك هيبقى تحفة 💪`,
+                            `صباح النشاط يا ${user.name} ☀️`,
+                            `يلا نبدأ يوم قوي يا ${user.name} 🔥`,
+                            `ربنا يوفقك النهاردة يا ${user.name} 🙏`,
+                            `خليك نشيط يا ${user.name}، هتنور المكان ✨`
+                        ];
+                        const randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
+                        alert(`${randomMsg}\n\nلا تنسى ترشيد استهلاك الكهرباء اليوم ⚡`);
                     } else {
                         updates.lastCheckOutDate = today;
                         updates.lastCheckOutTime = now.toLocaleTimeString();
@@ -351,10 +360,12 @@
                                     <button onClick={()=>setShowWithdraw(true)} className="bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs border border-orange-200">مسحوبات</button>
                                     <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-xs border border-red-200">إضافة خصم</button>
                                     <button onClick={()=>{
+                                        if(!confirm("هل انت متأكد من انك اليوم Over time؟")) return;
                                         const today = new Date().toLocaleDateString();
                                         if((user.overtimeRequests||[]).some(r => r.date === today && !r.status)) return;
                                         const reqs = [{date: today, status: null}, ...(user.overtimeRequests||[])];
                                         onUpdate(user.id, {overtimeRequests: reqs});
+                                        alert(`شكراً ${user.name} يا بطل 💪`);
                                     }} className="bg-purple-50 text-purple-700 py-3 rounded-xl font-bold text-xs border border-purple-200">Over time</button>
                                 </div>
                                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
