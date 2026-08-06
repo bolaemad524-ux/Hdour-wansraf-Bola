@@ -249,6 +249,23 @@
                             alert("تم تسجيل الانصراف مسبقاً");
                             return;
                         }
+                        // لو نسي انصراف يوم سابق
+                        if (user.lastCheckInDate && user.lastCheckInDate !== today) {
+                            const time = prompt(`نسيت تسجل انصراف أمس (${user.lastCheckInDate})\nاكتب معاد الانصراف (مثال: 7:30 PM)`);
+                            if (!time) return;
+                            const updates = {
+                                isCheckedIn: false,
+                                lastCheckOutDate: user.lastCheckInDate,
+                                lastCheckOutTime: time
+                            };
+                            if (user.checkInTimestamp) {
+                                // تقريب ساعات تقريبي
+                                updates.earlyLeaveCount = (Number(user.earlyLeaveCount)||0); // بدون حساب دقيق
+                            }
+                            await onUpdate(user.id, updates);
+                            alert("تم تسجيل انصراف أمس بنجاح");
+                            return;
+                        }
                         setShowDmg(true);
                     }
                 } catch(e) {
