@@ -149,8 +149,19 @@
                 }
             };
 
-            // دالة للتحقق مما إذا كان التاريخ هو اليوم
-            const isToday = (dateStr) => dateStr === new Date().toLocaleDateString();
+            // دالة للتحقق مما إذا كان التاريخ هو اليوم (ثابتة مهما كان شكل الجهاز)
+            const getTodayStr = () => new Date().toISOString().split('T')[0];
+            const isToday = (dateStr) => {
+                if (!dateStr) return false;
+                const today = getTodayStr();
+                if (dateStr === today) return true;
+                // دعم الصيغ القديمة
+                try {
+                    const d = new Date(dateStr);
+                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
+                } catch(e) {}
+                return dateStr === new Date().toLocaleDateString();
+            };
 
             return (
                 <div className="min-h-screen bg-slate-100 p-6 flex flex-col items-center">
@@ -172,10 +183,10 @@
                                 
                                 {/* عرض الوقت أسفل الكارت */}
                                 <div className="text-[10px] text-slate-500 mt-2 font-mono text-center w-full">
-                                    {isToday(emp.lastCheckInDate) && (
+                                    {(isToday(emp.lastCheckInDate) || emp.isCheckedIn) && emp.lastCheckInTime && (
                                         <div className="text-green-600 bg-green-50 rounded px-1 mb-0.5">دخول: {emp.lastCheckInTime}</div>
                                     )}
-                                    {isToday(emp.lastCheckOutDate) && (
+                                    {isToday(emp.lastCheckOutDate) && emp.lastCheckOutTime && (
                                         <div className="text-red-500 bg-red-50 rounded px-1">خروج: {emp.lastCheckOutTime}</div>
                                     )}
                                 </div>
@@ -235,22 +246,31 @@
             const handleAction = async () => {
                 try {
                     const now = new Date();
-                    const today = now.toLocaleDateString();
+                    const today = now.toISOString().split('T')[0];
+                    const isSameDay = (dateStr) => {
+                        if (!dateStr) return false;
+                        if (dateStr === today) return true;
+                        try {
+                            const d = new Date(dateStr);
+                            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
+                        } catch(e) {}
+                        return dateStr === now.toLocaleDateString();
+                    };
 
                     if (!user.isCheckedIn) {
-                        if (user.lastCheckInDate === today) {
+                        if (isSameDay(user.lastCheckInDate)) {
                             setErrorMsg("لقد قمت بالحضور بالفعل اليوم");
                             setTimeout(() => setErrorMsg(''), 3000);
                             return;
                         }
                         processAttendance(true);
                     } else {
-                        if (user.lastCheckOutDate === today) {
+                        if (isSameDay(user.lastCheckOutDate)) {
                             alert("تم تسجيل الانصراف مسبقاً");
                             return;
                         }
                         // لو نسي انصراف يوم سابق
-                        if (user.lastCheckInDate && user.lastCheckInDate !== today) {
+                        if (user.lastCheckInDate && !isSameDay(user.lastCheckInDate)) {
                             const time = prompt(`نسيت تسجل انصراف أمس (${user.lastCheckInDate})\nاكتب معاد الانصراف (مثال: 7:30 PM)`);
                             if (!time) return;
                             const updates = {
@@ -258,10 +278,6 @@
                                 lastCheckOutDate: user.lastCheckInDate,
                                 lastCheckOutTime: time
                             };
-                            if (user.checkInTimestamp) {
-                                // تقريب ساعات تقريبي
-                                updates.earlyLeaveCount = (Number(user.earlyLeaveCount)||0); // بدون حساب دقيق
-                            }
                             await onUpdate(user.id, updates);
                             alert("تم تسجيل انصراف أمس بنجاح");
                             return;
@@ -287,7 +303,7 @@
                 setLoading(true);
                 try {
                     const now = new Date();
-                    const today = now.toLocaleDateString();
+                    const today = now.toISOString().split('T')[0];
                     let updates = { isCheckedIn: isCheckIn };
                     if (updatedDamages) updates.damages = updatedDamages;
 
@@ -378,7 +394,7 @@
                                     <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-xs border border-red-200">إضافة خصم</button>
                                     <button onClick={()=>{
                                         if(!confirm("هل انت متأكد من انك اليوم Over time؟")) return;
-                                        const today = new Date().toLocaleDateString();
+                                        const today = new Date().toISOString().split('T')[0];
                                         if((user.overtimeRequests||[]).some(r => r.date === today && !r.status)) return;
                                         const reqs = [{date: today, status: null}, ...(user.overtimeRequests||[])];
                                         onUpdate(user.id, {overtimeRequests: reqs});
@@ -550,7 +566,17 @@
             };
 
             // دالة مساعدة لتحديد ما إذا كان اليوم هو تاريخ معين
-            const isToday = (dateStr) => dateStr === new Date().toLocaleDateString();
+            const getTodayStr = () => new Date().toISOString().split('T')[0];
+            const isToday = (dateStr) => {
+                if (!dateStr) return false;
+                const today = getTodayStr();
+                if (dateStr === today) return true;
+                try {
+                    const d = new Date(dateStr);
+                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
+                } catch(e) {}
+                return dateStr === new Date().toLocaleDateString();
+            };
 
             // دالة لحساب التأخير
             const checkLateStatus = (emp) => {
@@ -605,8 +631,8 @@
                                                 {isLate && <span className="bg-red-500 text-white text-[9px] px-1.5 rounded-full animate-pulse">متأخر</span>}
                                             </h3>
                                             <div className="text-[10px] text-slate-500 mt-0.5">
-                                                {isToday(emp.lastCheckInDate) && <span className="text-green-600 ml-2">دخول: {emp.lastCheckInTime}</span>}
-                                                {isToday(emp.lastCheckOutDate) && <span className="text-red-500">خروج: {emp.lastCheckOutTime}</span>}
+                                                {(isToday(emp.lastCheckInDate) || emp.isCheckedIn) && emp.lastCheckInTime && <span className="text-green-600 ml-2">دخول: {emp.lastCheckInTime}</span>}
+                                                {isToday(emp.lastCheckOutDate) && emp.lastCheckOutTime && <span className="text-red-500">خروج: {emp.lastCheckOutTime}</span>}
                                             </div>
                                         </div>
                                     </div>
