@@ -752,7 +752,14 @@
                                 <Line label="Over Time" value={otCount} extra={`${sum(otItems).toFixed(0)} ج`} color="text-purple-700" />
                                 <Line label="أيام أضافها المدير" value={addedDays} extra={`${sum(addedItems).toFixed(0)} ج`} color="text-blue-700" />
                                 <Line label="الحوافز" value={`${sum(bonusItems).toFixed(0)} ج`} color="text-green-700" />
-                                <Line label="الخصومات والمسحوبات" value={`${sum(deductItems).toFixed(0)} ج`} color="text-red-600" />
+                                <div className="mt-2 mb-1 text-sm font-bold text-red-700">📉 الخصومات والمسحوبات</div>
+                                {deductItems.length ? deductItems.map((t,i)=>(
+                                    <div key={i} className="flex justify-between text-xs py-1 border-b border-red-50">
+                                        <span className="text-slate-700">{t.note}{t.date ? <span className="text-slate-400"> — {t.date}</span> : null}</span>
+                                        <span className="font-bold text-red-600">{Number(t.amount).toFixed(0)} ج</span>
+                                    </div>
+                                )) : <div className="text-xs text-slate-400 py-1">لا يوجد</div>}
+                                <div className="flex justify-between text-sm py-1 font-bold"><span>إجمالي الخصومات</span><span className="text-red-600">{sum(deductItems).toFixed(0)} ج</span></div>
                                 <Line label="خصم نصف يوم" value={`${sum(halfItems).toFixed(0)} ج`} extra={`${halfItems.length} مرة`} color="text-orange-600" />
                                 <div className="flex justify-between items-center mt-4 pt-3 border-t-2 border-dashed">
                                     <span className="font-black text-lg">إجمالي الحساب</span>
@@ -764,6 +771,9 @@
                                         const phone = toWhatsApp(showReport.whatsapp);
                                         if(!phone) return alert("لا يوجد رقم واتساب لهذا الموظف");
                                         const total = (Number(showReport.currentBalance)||0).toFixed(0);
+                                        const deductLines = deductItems.length
+                                            ? deductItems.map(t => `• ${t.note}: *${Number(t.amount).toFixed(0)} ج*`).join('\n')
+                                            : '• لا يوجد';
                                         const msg =
 `📄 *كشف حساب*
 👤 ${showReport.name}
@@ -773,7 +783,10 @@
 ⏰ Over Time: *${otCount}*  |  ${sum(otItems).toFixed(0)} ج
 ➕ أيام أضافها المدير: *${addedDays}*  |  ${sum(addedItems).toFixed(0)} ج
 🎁 الحوافز: *${sum(bonusItems).toFixed(0)} ج*
-📉 الخصومات والمسحوبات: *${sum(deductItems).toFixed(0)} ج*
+────────────────
+📉 *الخصومات والمسحوبات:*
+${deductLines}
+🔻 الإجمالي: *${sum(deductItems).toFixed(0)} ج*
 ⏱️ خصم نصف يوم: *${sum(halfItems).toFixed(0)} ج* (${halfItems.length} مرة)
 ────────────────
 💰 *إجمالي الحساب: ${total} ج*
