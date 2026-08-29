@@ -55,7 +55,7 @@
         const { useState, useEffect, useRef } = React;
 
         // --- إعدادات ---
-        const MANAGER_PHONE = "201000000000"; // ⚠️ اكتب رقمك هنا
+        const MANAGER_PHONE = "201272128267"; // رقم واتساب المدير المرسل
         const INITIAL_ADMIN = { id: 'admin', name: 'المدير العام', password: '3316', role: 'admin' };
         const DEFAULT_WORK_HOURS = 8;
         const DEFAULT_START_HOUR = 11;
@@ -88,6 +88,15 @@
             const ampm = h >= 12 ? 'م' : 'ص';
             h = h % 12 || 12;
             return `${h}:${m}:${s} ${ampm}`;
+        };
+
+        const toWhatsApp = (num) => {
+            if (!num) return '';
+            let n = String(num).replace(/\D/g, '');
+            if (n.startsWith('00')) n = n.slice(2);
+            if (n.startsWith('0')) n = '20' + n.slice(1);
+            if (!n.startsWith('20')) n = '20' + n;
+            return n;
         };
 
         const getTotalDays = (u) => {
@@ -509,7 +518,7 @@
         };
 
         const AdminDashboard = ({ users, onAdd, onUpdate, onDelete, onLogout }) => {
-            const [newUser, setNewUser] = useState({ name: '', password: '', salary: '', hours: DEFAULT_WORK_HOURS, photo: '' });
+            const [newUser, setNewUser] = useState({ name: '', password: '', salary: '', hours: DEFAULT_WORK_HOURS, photo: '', whatsapp: '' });
             const [showAdd, setShowAdd] = useState(false);
             const [editingUser, setEditingUser] = useState(null);
             const [showPassModal, setShowPassModal] = useState(false);
@@ -552,10 +561,10 @@
                 const rate = parseFloat(newUser.salary)/30;
                 onAdd({
                     id: Date.now().toString(), role: 'employee',
-                    name: newUser.name, password: newUser.password, salary: parseFloat(newUser.salary), dailyRate: rate, targetHours: parseFloat(newUser.hours), photo: newUser.photo,
+                    name: newUser.name, password: newUser.password, salary: parseFloat(newUser.salary), dailyRate: rate, targetHours: parseFloat(newUser.hours), photo: newUser.photo, whatsapp: newUser.whatsapp,
                     currentBalance: 0, isCheckedIn: false, lateCount: 0, earlyLeaveCount: 0, attendanceDays: 0, transactions: [], notifications: [], damages: [], overtimeRequests: []
                 });
-                setShowAdd(false); setNewUser({name:'', password:'', salary:'', hours: DEFAULT_WORK_HOURS, photo: ''});
+                setShowAdd(false); setNewUser({name:'', password:'', salary:'', hours: DEFAULT_WORK_HOURS, photo: '', whatsapp: ''});
             };
 
             const saveEdit = (e) => {
@@ -563,7 +572,7 @@
                 const rate = parseFloat(editingUser.salary)/30;
                 const notif = { id: Date.now(), msg: `تم تعديل بياناتك: الراتب (${editingUser.salary})`, date: new Date().toLocaleString() };
                 onUpdate(editingUser.id, { 
-                    name: editingUser.name, password: editingUser.password, salary: parseFloat(editingUser.salary), dailyRate: rate, targetHours: parseFloat(editingUser.targetHours), photo: editingUser.photo,
+                    name: editingUser.name, password: editingUser.password, salary: parseFloat(editingUser.salary), dailyRate: rate, targetHours: parseFloat(editingUser.targetHours), photo: editingUser.photo, whatsapp: editingUser.whatsapp,
                     notifications: [notif, ...(editingUser.notifications||[])]
                 });
                 setEditingUser(null);
@@ -632,6 +641,7 @@
                                 {newUser.photo && <img src={newUser.photo} className="w-20 h-20 rounded-full mx-auto object-cover border-2" />}
                                 <input placeholder="الاسم" value={newUser.name} onChange={e=>setNewUser({...newUser, name:e.target.value})} className="border p-2 rounded" required />
                                 <input placeholder="كلمة المرور" value={newUser.password} onChange={e=>setNewUser({...newUser, password:e.target.value})} className="border p-2 rounded" required />
+                                <input placeholder="رقم الواتساب" value={newUser.whatsapp} onChange={e=>setNewUser({...newUser, whatsapp:e.target.value})} className="border p-2 rounded" />
                                 <input type="number" placeholder="الراتب" value={newUser.salary} onChange={e=>setNewUser({...newUser, salary:e.target.value})} className="border p-2 rounded" required />
                                 <input type="number" placeholder="ساعات العمل" value={newUser.hours} onChange={e=>setNewUser({...newUser, hours:e.target.value})} className="border p-2 rounded" required />
                                 <button className="bg-slate-800 text-white py-2 rounded">حفظ</button>
@@ -705,6 +715,7 @@
                                     <Icons.Camera />
                                     <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, setEditingUser, editingUser)} />
                                 </div>
+                                <input placeholder="رقم الواتساب" className="w-full border p-2 mb-2 rounded" value={editingUser.whatsapp||''} onChange={e=>setEditingUser({...editingUser, whatsapp:e.target.value})} />
                                 <input placeholder="الراتب" type="number" className="w-full border p-2 mb-2 rounded" value={editingUser.salary} onChange={e=>setEditingUser({...editingUser, salary:e.target.value})} />
                                 <input placeholder="الساعات" type="number" className="w-full border p-2 mb-2 rounded" value={editingUser.targetHours} onChange={e=>setEditingUser({...editingUser, targetHours:e.target.value})} />
                                 <input placeholder="كلمة المرور" className="w-full border p-2 mb-4 rounded" value={editingUser.password} onChange={e=>setEditingUser({...editingUser, password:e.target.value})} />
@@ -715,67 +726,63 @@
 
                     {showReport && (() => {
                         const all = showReport.transactions || [];
-                        const daysItems = all.filter(t => /راتب يومي|إضافة|Overtime|أيام عمل/.test(t.note||''));
-                        const bonusItems = all.filter(t => /حافز/.test(t.note||''));
-                        const deductItems = all.filter(t => t.type === 'out' && !/حافز/.test(t.note||''));
-                        const otherIn = all.filter(t => t.type === 'in' && !daysItems.includes(t) && !bonusItems.includes(t));
                         const sum = (arr) => arr.reduce((s,t)=>s+Number(t.amount||0),0);
-                        const daysSum = sum(daysItems);
-                        const bonusSum = sum(bonusItems)+sum(otherIn);
-                        const deductSum = sum(deductItems);
-                        const Row = ({t}) => (
-                            <div className="flex justify-between py-1 border-b last:border-0">
-                                <span className="text-slate-700">{t.note}</span>
-                                <span className={Number(t.amount)>=0?'text-green-600 font-bold':'text-red-600 font-bold'}>{Number(t.amount).toFixed(0)}</span>
+                        const attendCount = Number(showReport.attendanceDays) || all.filter(t => t.note === 'راتب يومي').length || 0;
+                        const otItems = all.filter(t => /Overtime|over time|أوفر/i.test(t.note||''));
+                        const otCount = (showReport.overtimeRequests||[]).filter(r=>r.status==='approved').length || otItems.length;
+                        const addedItems = all.filter(t => /إضافة/.test(t.note||''));
+                        const addedDays = addedItems.reduce((s,t)=>{ const m=String(t.note||'').match(/إضافة\s*([\d.]+)/); return s+(m?Number(m[1]):0); },0);
+                        const bonusItems = all.filter(t => /حافز/.test(t.note||''));
+                        const halfItems = all.filter(t => /نصف يوم/.test(t.note||''));
+                        const deductItems = all.filter(t => t.type==='out' && !/نصف يوم/.test(t.note||''));
+                        const Line = ({label, value, extra, color}) => (
+                            <div className="flex justify-between items-center py-2 border-b border-slate-100 text-sm">
+                                <span className="text-slate-700">{label}{extra ? <span className="text-slate-400 text-xs"> ({extra})</span> : null}</span>
+                                <span className={`font-bold ${color||'text-slate-800'}`}>{value}</span>
                             </div>
                         );
                         return (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4">
                             <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl overflow-hidden">
-                            <div id="receipt-to-save" className="bg-white receipt p-4 max-h-[70vh] overflow-y-auto">
-                                <h2 className="text-center font-black text-xl mb-1">فاتورة حساب</h2>
+                            <div id="receipt-to-save" className="bg-white p-5">
+                                <h2 className="text-center font-black text-xl">كشف حساب</h2>
                                 <h3 className="text-center font-bold text-indigo-700 mb-1">{showReport.name}</h3>
-                                <div className="text-[11px] text-slate-500 mb-3 text-center">{new Date().toLocaleString()}</div>
-                                <div className="flex justify-between text-xs bg-indigo-50 rounded p-2 mb-3">
-                                    <span>إجمالي الأيام</span>
-                                    <b className="text-indigo-700">{getTotalDays(showReport)}</b>
-                                </div>
-
-                                <div className="mb-3 text-xs border rounded overflow-hidden">
-                                    <div className="bg-green-100 text-green-800 font-bold px-2 py-1">الأيام والإضافات</div>
-                                    <div className="p-2">
-                                        {daysItems.length ? daysItems.map((t,i)=><Row key={i} t={t}/>) : <p className="text-slate-400">لا يوجد</p>}
-                                        <div className="flex justify-between font-bold pt-1 mt-1 border-t"><span>المجموع</span><span className="text-green-700">{daysSum.toFixed(0)}</span></div>
-                                    </div>
-                                </div>
-
-                                <div className="mb-3 text-xs border rounded overflow-hidden">
-                                    <div className="bg-blue-100 text-blue-800 font-bold px-2 py-1">الحوافز</div>
-                                    <div className="p-2">
-                                        {bonusItems.length || otherIn.length ? [...bonusItems, ...otherIn].map((t,i)=><Row key={i} t={t}/>) : <p className="text-slate-400">لا يوجد</p>}
-                                        <div className="flex justify-between font-bold pt-1 mt-1 border-t"><span>المجموع</span><span className="text-blue-700">{bonusSum.toFixed(0)}</span></div>
-                                    </div>
-                                </div>
-
-                                <div className="mb-3 text-xs border rounded overflow-hidden">
-                                    <div className="bg-red-100 text-red-800 font-bold px-2 py-1">الخصومات والمسحوبات</div>
-                                    <div className="p-2">
-                                        {deductItems.length ? deductItems.map((t,i)=><Row key={i} t={t}/>) : <p className="text-slate-400">لا يوجد</p>}
-                                        <div className="flex justify-between font-bold pt-1 mt-1 border-t"><span>المجموع</span><span className="text-red-700">{deductSum.toFixed(0)}</span></div>
-                                    </div>
-                                </div>
-
-                                <div className="border-t-2 border-dashed pt-2 text-sm space-y-1">
-                                    <div className="flex justify-between"><span>الأيام والإضافات</span><span className="text-green-600">+{daysSum.toFixed(0)}</span></div>
-                                    <div className="flex justify-between"><span>الحوافز</span><span className="text-blue-600">+{bonusSum.toFixed(0)}</span></div>
-                                    <div className="flex justify-between"><span>الخصومات</span><span className="text-red-600">{deductSum.toFixed(0)}</span></div>
-                                    <div className="flex justify-between text-lg font-black border-t pt-2"><span>الصافي</span><span className="text-green-700">{(Number(showReport.currentBalance)||0).toFixed(0)}</span></div>
+                                <div className="text-[11px] text-slate-500 mb-4 text-center">{new Date().toLocaleString()}</div>
+                                <Line label="إجمالي أيام الحضور" value={attendCount} extra="يوم" color="text-indigo-700" />
+                                <Line label="Over Time" value={otCount} extra={`${sum(otItems).toFixed(0)} ج`} color="text-purple-700" />
+                                <Line label="أيام أضافها المدير" value={addedDays} extra={`${sum(addedItems).toFixed(0)} ج`} color="text-blue-700" />
+                                <Line label="الحوافز" value={`${sum(bonusItems).toFixed(0)} ج`} color="text-green-700" />
+                                <Line label="الخصومات والمسحوبات" value={`${sum(deductItems).toFixed(0)} ج`} color="text-red-600" />
+                                <Line label="خصم نصف يوم" value={`${sum(halfItems).toFixed(0)} ج`} extra={`${halfItems.length} مرة`} color="text-orange-600" />
+                                <div className="flex justify-between items-center mt-4 pt-3 border-t-2 border-dashed">
+                                    <span className="font-black text-lg">إجمالي الحساب</span>
+                                    <span className="font-black text-xl text-green-700">{(Number(showReport.currentBalance)||0).toFixed(0)} ج</span>
                                 </div>
                             </div>
-                                <div className="flex gap-2 p-4 pt-0">
+                                <div className="flex flex-col gap-2 p-4 pt-0">
+                                    <button onClick={()=>{
+                                        const phone = toWhatsApp(showReport.whatsapp);
+                                        if(!phone) return alert("لا يوجد رقم واتساب لهذا الموظف");
+                                        const msg =
+`كشف حساب - ${showReport.name}
+${new Date().toLocaleString()}
+
+إجمالي أيام الحضور: ${attendCount} يوم
+Over Time: ${otCount} (${sum(otItems).toFixed(0)} ج)
+أيام أضافها المدير: ${addedDays} (${sum(addedItems).toFixed(0)} ج)
+الحوافز: ${sum(bonusItems).toFixed(0)} ج
+الخصومات والمسحوبات: ${sum(deductItems).toFixed(0)} ج
+خصم نصف يوم: ${sum(halfItems).toFixed(0)} ج (${halfItems.length} مرة)
+
+إجمالي الحساب: ${(Number(showReport.currentBalance)||0).toFixed(0)} ج
+
+من الإدارة`;
+                                        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                                    }} className="w-full bg-green-600 text-white py-2 rounded font-bold text-sm">إرسال واتساب</button>
+                                    <div className="flex gap-2">
                                     <button onClick={()=>{
                                         if(window.html2canvas){
-                                            html2canvas(document.getElementById('receipt-to-save')).then(canvas=>{
+                                            html2canvas(document.getElementById('receipt-to-save'), {scale:2}).then(canvas=>{
                                                 const link=document.createElement('a');
                                                 link.download=`كشف-${showReport.name}.png`;
                                                 link.href=canvas.toDataURL();
@@ -784,6 +791,7 @@
                                         } else alert("جاري التحميل...");
                                     }} className="flex-1 bg-indigo-600 text-white py-2 rounded font-bold text-sm">حفظ كصورة</button>
                                     <button onClick={()=>setShowReport(null)} className="flex-1 bg-slate-900 text-white py-2 rounded font-bold text-sm">إغلاق</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
