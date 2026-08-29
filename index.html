@@ -90,6 +90,16 @@
             return `${h}:${m}:${s} ${ampm}`;
         };
 
+        const getTotalDays = (u) => {
+            const checkins = Number(u.attendanceDays) || (u.transactions||[]).filter(t => t.note === 'راتب يومي').length || 0;
+            const added = (u.transactions||[]).reduce((sum, t) => {
+                const m = String(t.note||'').match(/إضافة\s*([\d.]+)/);
+                return sum + (m ? Number(m[1]) : 0);
+            }, 0);
+            const ot = (u.overtimeRequests||[]).filter(r => r.status === 'approved').length;
+            return checkins + added + ot;
+        };
+
         const App = () => {
             const [users, setUsers] = useState([]);
             const [currentUser, setCurrentUser] = useState(null);
@@ -384,7 +394,7 @@
                     <div className="mx-4 -mt-10 bg-white rounded-2xl shadow-lg p-4 flex justify-between text-center relative z-10">
                         <div><span className="text-xs text-slate-400">تأخير</span><p className="font-bold text-red-500">{user.lateCount||0}</p></div>
                         <div className="w-px bg-slate-100"></div>
-                        <div><span className="text-xs text-slate-400">إجمالي الأيام</span><p className="font-bold text-indigo-600">{(user.attendanceDays || (user.transactions||[]).filter(t=>t.note==='راتب يومي').length || 0) + (user.overtimeRequests||[]).filter(r=>r.status==='approved').length}</p></div>
+                        <div><span className="text-xs text-slate-400">إجمالي الأيام</span><p className="font-bold text-indigo-600">{getTotalDays(user)}</p></div>
                         <div className="w-px bg-slate-100"></div>
                         <div><span className="text-xs text-slate-400">الرصيد</span><p className="font-bold text-green-600">{(user.currentBalance||0).toFixed(0)}</p></div>
                     </div>
@@ -655,7 +665,7 @@
                                 </div>
                                 <div className="flex justify-between items-center bg-slate-50 p-2 rounded text-xs mb-2">
                                     <span>الرصيد: <b className="text-green-600">{(Number(emp.currentBalance)||0).toFixed(0)}</b></span>
-                                    <span>إجمالي الأيام: <b className="text-indigo-600">{(emp.attendanceDays || (emp.transactions||[]).filter(t=>t.note==='راتب يومي').length || 0) + (emp.overtimeRequests||[]).filter(r=>r.status==='approved').length}</b></span>
+                                    <span>إجمالي الأيام: <b className="text-indigo-600">{getTotalDays(emp)}</b></span>
                                     <span>المطلوب: {emp.targetHours} س</span>
                                 </div>
                                 
