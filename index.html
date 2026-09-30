@@ -6,9 +6,9 @@
     <title>نظام الموظفين</title>
     
     <!-- React & Tailwind -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
@@ -37,6 +37,11 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap');
         body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; user-select: none; }
+        input, textarea { -webkit-user-select: text; user-select: text; }
+        .pulse-animation { animation: pulseRing 2s ease-in-out infinite; }
+        @keyframes pulseRing { 0%,100% { transform: scale(1); opacity: .12; } 50% { transform: scale(1.15); opacity: .3; } }
+        .animate-fade-in { animation: fadeIn .3s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .emp-card { transition: all 0.2s; cursor: pointer; }
@@ -90,9 +95,19 @@
             return `${h}:${m}:${s} ${ampm}`;
         };
 
+        const localDateStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const isTodayStr = (dateStr) => {
+            if (!dateStr) return false;
+            const now = new Date(), today = localDateStr(now);
+            if (dateStr === today) return true;
+            const d = new Date(dateStr);
+            if (!isNaN(d.getTime())) return localDateStr(d) === today;
+            return dateStr === now.toLocaleDateString();
+        };
+
         const toWhatsApp = (num) => {
             if (!num) return '';
-            let n = String(num).replace(/\D/g, '');
+            let n = String(num).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
             if (n.startsWith('00')) n = n.slice(2);
             if (n.startsWith('0')) n = '20' + n.slice(1);
             if (!n.startsWith('20')) n = '20' + n;
@@ -102,7 +117,7 @@
         const getTotalDays = (u) => {
             const checkins = Number(u.attendanceDays) || (u.transactions||[]).filter(t => t.note === 'راتب يومي').length || 0;
             const added = (u.transactions||[]).reduce((sum, t) => {
-                const m = String(t.note||'').match(/إضافة\s*([\d.]+)/);
+                const m = String(t.note||'').match(/^إضافة\s*([\d.]+)/);
                 return sum + (m ? Number(m[1]) : 0);
             }, 0);
             const ot = (u.overtimeRequests||[]).filter(r => r.status === 'approved').length;
@@ -111,62 +126,67 @@
 
         const App = () => {
             const [users, setUsers] = useState([]);
-            const [currentUser, setCurrentUser] = useState(null);
+            const [currentUserId, setCurrentUserId] = useState(null);
             const [loading, setLoading] = useState(true);
             const [dbError, setDbError] = useState(false);
+            const currentUser = currentUserId ? (users.find(u => u.id === currentUserId) || null) : null;
 
             useEffect(() => {
-                if (!window.db) { setDbError(true); setLoading(false); return; }
-                const { collection, onSnapshot, query, setDoc, doc } = window.dbMethods;
-                
-                const unsubscribe = onSnapshot(query(collection(window.db, "users")), (snapshot) => {
-                    const fetchedUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    if (fetchedUsers.length === 0 || !fetchedUsers.find(u => u.id === 'admin')) {
-                        setDoc(doc(window.db, "users", "admin"), INITIAL_ADMIN);
+                let unsub = null, timer = null, tries = 0;
+                const start = () => {
+                    if (!window.db) {
+                        if (++tries > 50) { setDbError(true); setLoading(false); }
+                        else timer = setTimeout(start, 200);
+                        return;
                     }
-                    setUsers(fetchedUsers);
-                    if (currentUser) {
-                        const me = fetchedUsers.find(u => u.id === currentUser.id);
-                        if (me) setCurrentUser(me);
-                    }
-                    setLoading(false);
-                }, (error) => {
-                    console.error("Connection Error:", error);
-                    setDbError(true);
-                    setLoading(false);
-                });
-                return () => unsubscribe();
-            }, [currentUser?.id]);
+                    const { collection, onSnapshot, query, setDoc, doc } = window.dbMethods;
+                    unsub = onSnapshot(query(collection(window.db, "users")), (snapshot) => {
+                        const fetched = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+                        if (!fetched.find(u => u.id === 'admin')) setDoc(doc(window.db, "users", "admin"), INITIAL_ADMIN);
+                        setUsers(fetched);
+                        setLoading(false);
+                    }, (error) => { console.error("Connection Error:", error); setDbError(true); setLoading(false); });
+                };
+                start();
+                return () => { clearTimeout(timer); if (unsub) unsub(); };
+            }, []);
 
             const updateCloud = async (id, data) => {
-                try { await window.dbMethods.updateDoc(window.dbMethods.doc(window.db, "users", id), data); } catch(e) { console.error(e); }
+                try { await window.dbMethods.updateDoc(window.dbMethods.doc(window.db, "users", id), data); return true; } catch(e) { console.error(e); alert("تعذر حفظ البيانات، تأكد من الاتصال بالإنترنت"); return false; }
             };
             const addToCloud = async (userData) => {
                 try { await window.dbMethods.setDoc(window.dbMethods.doc(window.db, "users", userData.id), userData); } catch(e) { console.error(e); }
             };
             const deleteFromCloud = async (id) => {
-                if(confirm("حذف نهائي؟")) await window.dbMethods.deleteDoc(window.dbMethods.doc(window.db, "users", id));
+                try { await window.dbMethods.deleteDoc(window.dbMethods.doc(window.db, "users", id)); } catch(e) { console.error(e); alert("تعذر الحذف"); }
             };
 
             if (dbError) return <div className="h-screen flex flex-col items-center justify-center text-slate-500"><Icons.WifiOff /><p className="mt-2">تأكد من إعدادات قاعدة البيانات</p></div>;
             if (loading) return <div className="h-screen flex flex-col items-center justify-center"><div className="loader"></div><p className="mt-4 text-indigo-600 font-bold">جاري الاتصال بالسيرفر...</p></div>;
 
-            if (!currentUser) return <KioskLogin users={users} onLogin={setCurrentUser} />;
-            if (currentUser.role === 'admin') return <AdminDashboard users={users} onAdd={addToCloud} onUpdate={updateCloud} onDelete={deleteFromCloud} onLogout={()=>setCurrentUser(null)} />;
-            return <EmployeeApp user={currentUser} onUpdate={updateCloud} onLogout={()=>setCurrentUser(null)} />;
+            if (!currentUser) return <KioskLogin users={users} onLogin={u => setCurrentUserId(u.id)} />;
+            if (currentUser.role === 'admin') return <AdminDashboard users={users} onAdd={addToCloud} onUpdate={updateCloud} onDelete={deleteFromCloud} onLogout={()=>setCurrentUserId(null)} />;
+            return <EmployeeApp user={currentUser} onUpdate={updateCloud} onLogout={()=>setCurrentUserId(null)} />;
         };
 
         const KioskLogin = ({ users, onLogin }) => {
             const [selected, setSelected] = useState(null);
             const [pass, setPass] = useState('');
             const [clicks, setClicks] = useState(0);
+            const clickTimer = useRef(null);
+            const [online, setOnline] = useState(navigator.onLine);
+            useEffect(() => {
+                const on = () => setOnline(true), off = () => setOnline(false);
+                window.addEventListener('online', on); window.addEventListener('offline', off);
+                return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+            }, []);
             
             const employees = users.filter(u => u.role === 'employee');
             const admin = users.find(u => u.role === 'admin');
 
             const handleAdmin = () => {
-                const c = clicks + 1; setClicks(c);
-                if(c === 3) { setSelected(admin); setClicks(0); }
+                const c = clicks + 1; setClicks(c); clearTimeout(clickTimer.current); clickTimer.current = setTimeout(() => setClicks(0), 1500);
+                if(c === 3 && admin) { setSelected(admin); setClicks(0); }
             };
 
             const login = (e) => {
@@ -174,30 +194,19 @@
                 if (selected && pass === selected.password) {
                     onLogin(selected);
                 } else {
-                    alert("خطأ في كلمة المرور");
+                    alert("خطأ في كلمة المرور"); setPass('');
                 }
             };
 
             // دالة للتحقق مما إذا كان التاريخ هو اليوم (ثابتة مهما كان شكل الجهاز)
-            const getTodayStr = () => new Date().toISOString().split('T')[0];
-            const isToday = (dateStr) => {
-                if (!dateStr) return false;
-                const today = getTodayStr();
-                if (dateStr === today) return true;
-                // دعم الصيغ القديمة
-                try {
-                    const d = new Date(dateStr);
-                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
-                } catch(e) {}
-                return dateStr === new Date().toLocaleDateString();
-            };
+            const isToday = isTodayStr;
 
             return (
                 <div className="min-h-screen bg-slate-100 p-6 flex flex-col items-center">
                     <div className="text-center mb-8 cursor-pointer select-none" onClick={handleAdmin}>
                         <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 text-white shadow-xl"><Icons.Cloud /></div>
                         <h1 className="text-3xl font-black text-slate-800">HR System</h1>
-                        <p className="text-green-600 text-sm font-bold mt-1">● متصل أونلاين</p>
+                        <p className={`text-sm font-bold mt-1 ${online ? 'text-green-600' : 'text-red-500'}`}>{online ? '● متصل أونلاين' : '● لا يوجد اتصال'}</p>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-4xl">
                         {employees.map(emp => (
@@ -275,16 +284,8 @@
             const handleAction = async () => {
                 try {
                     const now = new Date();
-                    const today = now.toISOString().split('T')[0];
-                    const isSameDay = (dateStr) => {
-                        if (!dateStr) return false;
-                        if (dateStr === today) return true;
-                        try {
-                            const d = new Date(dateStr);
-                            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
-                        } catch(e) {}
-                        return dateStr === now.toLocaleDateString();
-                    };
+                    const today = localDateStr(now);
+                    const isSameDay = isTodayStr;
 
                     if (!user.isCheckedIn) {
                         if (isSameDay(user.lastCheckInDate)) {
@@ -307,8 +308,7 @@
                                 lastCheckOutDate: user.lastCheckInDate,
                                 lastCheckOutTime: time
                             };
-                            await onUpdate(user.id, updates);
-                            alert("تم تسجيل انصراف أمس بنجاح");
+                            if (await onUpdate(user.id, updates)) alert("تم تسجيل انصراف أمس بنجاح");
                             return;
                         }
                         setShowDmg(true);
@@ -319,9 +319,10 @@
                 }
             };
 
-            const confirmOut = () => {
+            const confirmOut = (withDmg) => {
+                if (loading) return;
                 let dmgs = [...(user.damages||[])];
-                if (hasDmg && desc) {
+                if (withDmg && desc) {
                     dmgs.unshift({date: new Date().toLocaleString(), desc, status: null});
                 }
                 processAttendance(false, dmgs);
@@ -332,8 +333,9 @@
                 setLoading(true);
                 try {
                     const now = new Date();
-                    const today = now.toISOString().split('T')[0];
+                    const today = localDateStr(now);
                     let updates = { isCheckedIn: isCheckIn };
+                    let msg = '';
                     if (updatedDamages) updates.damages = updatedDamages;
 
                     if(isCheckIn) {
@@ -356,7 +358,7 @@
                             `خليك نشيط يا ${user.name}، هتنور المكان ✨`
                         ];
                         const randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
-                        alert(`${randomMsg}\n\nلا تنسى ترشيد استهلاك الكهرباء اليوم ⚡`);
+                        msg = `${randomMsg}\n\nلا تنسى ترشيد استهلاك الكهرباء اليوم ⚡`;
                     } else {
                         updates.lastCheckOutDate = today;
                         updates.lastCheckOutTime = formatTime(now);
@@ -365,15 +367,16 @@
                             const target = user.targetHours || DEFAULT_WORK_HOURS;
                             if(h < target - 0.5) {
                                 updates.earlyLeaveCount = (Number(user.earlyLeaveCount)||0)+1;
-                                alert(`⚠️ انتبه: عملت ${h.toFixed(1)} ساعة فقط.`);
+                                msg = `⚠️ انتبه: عملت ${h.toFixed(1)} ساعة فقط.`;
                             } else {
-                                alert("تم تسجيل الانصراف بنجاح 👋");
+                                msg = "تم تسجيل الانصراف بنجاح 👋";
                             }
                         } else {
-                            alert("تم تسجيل الانصراف بنجاح 👋");
+                            msg = "تم تسجيل الانصراف بنجاح 👋";
                         }
                     }
-                    await onUpdate(user.id, updates);
+                    const ok = await onUpdate(user.id, updates);
+                    if (ok && msg) alert(msg);
                 } catch(e) {
                     console.error("Error in processAttendance", e);
                     alert("حدث خطأ في الاتصال، تأكد من الإنترنت");
@@ -405,13 +408,13 @@
                         <div className="w-px bg-slate-100"></div>
                         <div><span className="text-xs text-slate-400">إجمالي الأيام</span><p className="font-bold text-indigo-600">{getTotalDays(user)}</p></div>
                         <div className="w-px bg-slate-100"></div>
-                        <div><span className="text-xs text-slate-400">الرصيد</span><p className="font-bold text-green-600">{(user.currentBalance||0).toFixed(0)}</p></div>
+                        <div><span className="text-xs text-slate-400">الرصيد</span><p className="font-bold text-green-600">{(Number(user.currentBalance)||0).toFixed(0)}</p></div>
                     </div>
 
                     <div className="p-6 text-center pt-8 pb-24">
                         {tab === 'home' && (
-                            <div className="flex justify-center">
-                                {!user.isCheckedIn && !loading && <div className="absolute inset-0 bg-indigo-500 rounded-full opacity-10 pulse-animation scale-50 z-0"></div>}
+                            <div className="flex justify-center relative">
+                                {!user.isCheckedIn && !loading && <div className="absolute left-1/2 top-1/2 -ml-24 -mt-24 w-48 h-48 bg-indigo-500 rounded-full pulse-animation z-0"></div>}
                                 <button onClick={handleAction} disabled={loading} className={`w-48 h-48 rounded-full border-4 shadow-2xl flex flex-col items-center justify-center mx-auto transition-all relative z-10 ${user.isCheckedIn ? 'bg-white border-red-500 text-red-500' : 'bg-indigo-600 border-indigo-200 text-white'}`}>
                                     {loading ? <div className="loader"></div> : (user.isCheckedIn ? <><Icons.LogOut /><span className="text-2xl font-bold mt-2">انصراف</span></> : <><Icons.Fingerprint /><span className="text-2xl font-bold mt-2">حضور</span></>)}
                                 </button>
@@ -425,15 +428,15 @@
                                     <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-xs border border-red-200">إضافة خصم</button>
                                     <button onClick={()=>{
                                         if(!confirm("هل انت متأكد من انك اليوم Over time؟")) return;
-                                        const today = new Date().toISOString().split('T')[0];
-                                        if((user.overtimeRequests||[]).some(r => r.date === today && !r.status)) return;
+                                        const today = localDateStr();
+                                        if((user.overtimeRequests||[]).some(r => r.date === today)) return alert("تم تسجيل طلب Over time لليوم بالفعل");
                                         const reqs = [{date: today, status: null}, ...(user.overtimeRequests||[])];
                                         onUpdate(user.id, {overtimeRequests: reqs});
                                         alert(`شكراً ${user.name} يا بطل 💪`);
                                     }} className="bg-purple-50 text-purple-700 py-3 rounded-xl font-bold text-xs border border-purple-200">Over time</button>
                                 </div>
                                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
-                                    <div><p className="text-xs text-slate-400 mb-1">الراتب الأساسي</p><p className="font-bold text-lg text-slate-800 tracking-wider">{showSalary ? `${(user.salary||0).toFixed(0)} ج.م` : '******'}</p></div>
+                                    <div><p className="text-xs text-slate-400 mb-1">الراتب الأساسي</p><p className="font-bold text-lg text-slate-800 tracking-wider">{showSalary ? `${(Number(user.salary)||0).toFixed(0)} ج.م` : '******'}</p></div>
                                     <button onClick={() => setShowSalary(!showSalary)} className="p-2 text-indigo-500 hover:bg-indigo-50 rounded-full">{showSalary ? <Icons.EyeOff /> : <Icons.Eye />}</button>
                                 </div>
                                 <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
@@ -469,7 +472,7 @@
                         )}
                     </div>
                     
-                    <div className="fixed bottom-0 w-full bg-white border-t border-slate-200 p-2 flex justify-around items-center z-40 max-w-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
+                    <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full bg-white border-t border-slate-200 p-2 flex justify-around items-center z-40 max-w-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                         <button onClick={()=>setTab('home')} className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all ${tab==='home'?'text-indigo-600 bg-indigo-50':'text-slate-400 hover:bg-slate-50'}`}><Icons.Fingerprint /> <span className="text-[10px] font-bold">الرئيسية</span></button>
                         <button onClick={()=>setTab('wallet')} className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all ${tab==='wallet'?'text-indigo-600 bg-indigo-50':'text-slate-400 hover:bg-slate-50'}`}><Icons.Wallet /> <span className="text-[10px] font-bold">حسابي</span></button>
                     </div>
@@ -479,9 +482,9 @@
                             <div className="bg-white w-full max-w-xs p-6 rounded-2xl text-center">
                                 <h3 className="font-bold mb-4 text-lg">هل أتلفت شيئاً اليوم؟</h3>
                                 {hasDmg === null ? (
-                                    <div className="flex gap-3 justify-center"><button onClick={() => setHasDmg(true)} className="flex-1 bg-red-50 text-red-600 py-3 rounded-xl font-bold border border-red-200">نعم</button><button onClick={() => { setHasDmg(false); setTimeout(confirmOut, 100); }} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold">لا</button></div>
+                                    <div className="flex gap-3 justify-center"><button onClick={() => setHasDmg(true)} className="flex-1 bg-red-50 text-red-600 py-3 rounded-xl font-bold border border-red-200">نعم</button><button onClick={() => confirmOut(false)} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold">لا</button></div>
                                 ) : (
-                                    <div className="animate-fade-in"><textarea className="w-full border p-3 rounded-xl text-sm h-24 mb-4" placeholder="ما هي التلفيات؟" value={desc} onChange={e=>setDesc(e.target.value)}></textarea><button onClick={confirmOut} disabled={!desc} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold disabled:opacity-50">تأكيد الانصراف</button></div>
+                                    <div className="animate-fade-in"><textarea className="w-full border p-3 rounded-xl text-sm h-24 mb-4" placeholder="ما هي التلفيات؟" value={desc} onChange={e=>setDesc(e.target.value)}></textarea><button onClick={() => confirmOut(true)} disabled={!desc} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold disabled:opacity-50">تأكيد الانصراف</button></div>
                                 )}
                             </div>
                         </div>
@@ -548,7 +551,7 @@
                             canvas.height = height;
                             ctx.drawImage(img, 0, 0, width, height);
                             const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-                            targetStateSetter({...targetState, photo: dataUrl});
+                            targetStateSetter(prev => ({...prev, photo: dataUrl}));
                         }
                         img.src = event.target.result;
                     }
@@ -569,25 +572,27 @@
 
             const saveEdit = (e) => {
                 e.preventDefault();
-                const rate = parseFloat(editingUser.salary)/30;
-                const notif = { id: Date.now(), msg: `تم تعديل بياناتك: الراتب (${editingUser.salary})`, date: new Date().toLocaleString() };
-                onUpdate(editingUser.id, { 
-                    name: editingUser.name, password: editingUser.password, salary: parseFloat(editingUser.salary), dailyRate: rate, targetHours: parseFloat(editingUser.targetHours), photo: editingUser.photo, whatsapp: editingUser.whatsapp,
-                    notifications: [notif, ...(editingUser.notifications||[])]
-                });
+                const orig = users.find(u => u.id === editingUser.id) || editingUser;
+                const salary = parseFloat(editingUser.salary);
+                if (isNaN(salary) || salary < 0) return alert("الراتب غير صحيح");
+                const data = { name: editingUser.name, password: editingUser.password, salary, dailyRate: salary/30, targetHours: parseFloat(editingUser.targetHours) || DEFAULT_WORK_HOURS, photo: editingUser.photo || '', whatsapp: editingUser.whatsapp || '' };
+                if (Number(orig.salary) !== salary) data.notifications = [{ id: Date.now(), msg: `تم تعديل بياناتك: الراتب (${salary})`, date: new Date().toLocaleString() }, ...(orig.notifications||[])];
+                onUpdate(editingUser.id, data);
                 setEditingUser(null);
             };
 
             const addTransaction = (emp, amount, note) => {
+                if (!Number.isFinite(amount) || amount === 0) return alert("القيمة غير صحيحة");
                 const newTrans = { date: new Date().toLocaleString(), amount, note, type: amount > 0 ? 'in' : 'out' };
                 onUpdate(emp.id, { currentBalance: (Number(emp.currentBalance)||0) + amount, transactions: [newTrans, ...(emp.transactions || [])] });
             };
 
             const resolveDamage = (emp, idx) => {
-                const cost = parseFloat(dmgCost[idx]); if(!cost) return;
-                const newDamages = [...emp.damages]; newDamages[idx].status = 'resolved'; newDamages[idx].cost = cost;
+                const k = emp.id + '-' + idx; const cost = parseFloat(dmgCost[k]); if(!(cost > 0)) return alert("اكتب سعر التلفيات");
+                const newDamages = emp.damages.map((d, j) => j === idx ? {...d, status: 'resolved', cost} : d);
                 addTransaction(emp, -cost, `تلفيات: ${newDamages[idx].desc}`);
                 onUpdate(emp.id, { damages: newDamages });
+                setDmgCost(c => { const n = {...c}; delete n[k]; return n; });
             };
 
             const updateAdminPass = () => {
@@ -597,17 +602,7 @@
             };
 
             // دالة مساعدة لتحديد ما إذا كان اليوم هو تاريخ معين
-            const getTodayStr = () => new Date().toISOString().split('T')[0];
-            const isToday = (dateStr) => {
-                if (!dateStr) return false;
-                const today = getTodayStr();
-                if (dateStr === today) return true;
-                try {
-                    const d = new Date(dateStr);
-                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
-                } catch(e) {}
-                return dateStr === new Date().toLocaleDateString();
-            };
+            const isToday = isTodayStr;
 
             // دالة لحساب التأخير
             const checkLateStatus = (emp) => {
@@ -680,14 +675,14 @@
                                 </div>
                                 
                                 {emp.damages?.map((d, i) => !d.status && (
-                                    <div key={i} className="bg-red-50 p-2 mb-2 rounded flex justify-between items-center border border-red-100"><span className="text-xs text-red-600 font-bold">⚠️ {d.desc}</span><div className="flex gap-1"><input type="number" placeholder="سعر" className="w-16 p-1 text-xs border rounded" onChange={e => setDmgCost({...dmgCost, [i]: e.target.value})} /><button onClick={() => resolveDamage(emp, i)} className="bg-red-600 text-white px-2 py-1 text-xs rounded">خصم</button></div></div>
+                                    <div key={i} className="bg-red-50 p-2 mb-2 rounded flex justify-between items-center border border-red-100"><span className="text-xs text-red-600 font-bold">⚠️ {d.desc}</span><div className="flex gap-1"><input type="number" placeholder="سعر" className="w-16 p-1 text-xs border rounded" onChange={e => setDmgCost({...dmgCost, [emp.id + '-' + i]: e.target.value})} /><button onClick={() => resolveDamage(emp, i)} className="bg-red-600 text-white px-2 py-1 text-xs rounded">خصم</button></div></div>
                                 ))}
                                 {emp.overtimeRequests?.map((r, i) => !r.status && (
                                     <div key={i} className="bg-purple-50 p-2 mb-2 rounded flex justify-between items-center border border-purple-100">
                                         <span className="text-xs text-purple-700 font-bold">Overtime: {r.date}</span>
                                         <button onClick={()=>{
                                             const reqs = [...(emp.overtimeRequests||[])];
-                                            reqs[i].status = 'approved';
+                                            reqs[i] = {...reqs[i], status: 'approved'};
                                             const extra = emp.dailyRate || 0;
                                             addTransaction(emp, extra, `Overtime: ${r.date}`);
                                             onUpdate(emp.id, {overtimeRequests: reqs});
@@ -697,10 +692,10 @@
 
                                 <div className="grid grid-cols-2 gap-2 mt-2">
                                     <button onClick={()=>{ if(confirm("تأكيد خصم نصف يوم؟")) addTransaction(emp, -(emp.dailyRate/2 || 0), "خصم نصف يوم"); }} className="text-xs bg-red-50 text-red-600 py-2 rounded font-bold">خصم نصف يوم</button>
-                                    <button onClick={()=>{const v=prompt("أيام:"); if(v) addTransaction(emp, parseFloat(v)*emp.dailyRate, `إضافة ${v} أيام`)}} className="text-xs bg-blue-50 text-blue-600 py-2 rounded font-bold">+ أيام عمل</button>
+                                    <button onClick={()=>{const v=prompt("أيام:"); if(v) addTransaction(emp, parseFloat(v)*(emp.dailyRate||0), `إضافة ${v} أيام`)}} className="text-xs bg-blue-50 text-blue-600 py-2 rounded font-bold">+ أيام عمل</button>
                                     <button onClick={()=>{const v=prompt("حافز:"); if(v) addTransaction(emp, parseFloat(v), "حافز")}} className="text-xs bg-green-50 text-green-600 py-2 rounded font-bold">حافز</button>
                                     <button onClick={()=>{const d=prompt("وصف الخصم:"); if(d){const cost=prompt("السعر:"); if(cost){const dmgs=[{date:new Date().toLocaleString(),desc:d,status:'resolved',cost:parseFloat(cost)},...(emp.damages||[])]; addTransaction(emp, -parseFloat(cost), `خصم: ${d}`); onUpdate(emp.id,{damages:dmgs});}}}} className="text-xs bg-red-100 text-red-700 py-2 rounded font-bold">+ خصم جديد</button>
-                                    <div className="col-span-2 flex gap-1"><button onClick={()=>{ if(confirm("تصفير؟")) onUpdate(emp.id, {currentBalance:0, lateCount:0, earlyLeaveCount:0, attendanceDays:0, damages:[], transactions:[], overtimeRequests:[]}); }} className="flex-1 text-xs bg-slate-800 text-white py-2 rounded font-bold">تصفير (قبض)</button><button onClick={()=>{ if(confirm("حذف؟")) onDelete(emp.id); }} className="px-3 text-xs bg-red-100 text-red-600 rounded font-bold">حذف</button></div>
+                                    <div className="col-span-2 flex gap-1"><button onClick={()=>{ if(confirm(`تصفير حساب ${emp.name}؟ الرصيد الحالي ${(Number(emp.currentBalance)||0).toFixed(0)} ج وسيتم مسح كل المعاملات`)) onUpdate(emp.id, {currentBalance:0, lateCount:0, earlyLeaveCount:0, attendanceDays:0, damages:[], transactions:[], overtimeRequests:[]}); }} className="flex-1 text-xs bg-slate-800 text-white py-2 rounded font-bold">تصفير (قبض)</button><button onClick={()=>{ if(confirm(`حذف ${emp.name} نهائياً؟`)) onDelete(emp.id); }} className="px-3 text-xs bg-red-100 text-red-600 rounded font-bold">حذف</button></div>
                                 </div>
                             </div>
                         )})}
@@ -715,6 +710,7 @@
                                     <Icons.Camera />
                                     <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleImageChange(e, setEditingUser, editingUser)} />
                                 </div>
+                                <input placeholder="الاسم" className="w-full border p-2 mb-2 rounded" value={editingUser.name||''} onChange={e=>setEditingUser({...editingUser, name:e.target.value})} required />
                                 <input placeholder="رقم الواتساب" className="w-full border p-2 mb-2 rounded" value={editingUser.whatsapp||''} onChange={e=>setEditingUser({...editingUser, whatsapp:e.target.value})} />
                                 <input placeholder="الراتب" type="number" className="w-full border p-2 mb-2 rounded" value={editingUser.salary} onChange={e=>setEditingUser({...editingUser, salary:e.target.value})} />
                                 <input placeholder="الساعات" type="number" className="w-full border p-2 mb-2 rounded" value={editingUser.targetHours} onChange={e=>setEditingUser({...editingUser, targetHours:e.target.value})} />
@@ -728,13 +724,13 @@
                         const all = showReport.transactions || [];
                         const sum = (arr) => arr.reduce((s,t)=>s+Number(t.amount||0),0);
                         const attendCount = Number(showReport.attendanceDays) || all.filter(t => t.note === 'راتب يومي').length || 0;
-                        const otItems = all.filter(t => /Overtime|over time|أوفر/i.test(t.note||''));
+                        const otItems = all.filter(t => t.type==='in' && /Overtime|over time|أوفر/i.test(t.note||''));
                         const otCount = (showReport.overtimeRequests||[]).filter(r=>r.status==='approved').length || otItems.length;
-                        const addedItems = all.filter(t => /إضافة/.test(t.note||''));
-                        const addedDays = addedItems.reduce((s,t)=>{ const m=String(t.note||'').match(/إضافة\s*([\d.]+)/); return s+(m?Number(m[1]):0); },0);
-                        const bonusItems = all.filter(t => /حافز/.test(t.note||''));
-                        const halfItems = all.filter(t => /نصف يوم/.test(t.note||''));
-                        const deductItems = all.filter(t => t.type==='out' && !/نصف يوم/.test(t.note||''));
+                        const addedItems = all.filter(t => t.type==='in' && /^إضافة/.test(t.note||''));
+                        const addedDays = addedItems.reduce((s,t)=>{ const m=String(t.note||'').match(/^إضافة\s*([\d.]+)/); return s+(m?Number(m[1]):0); },0);
+                        const bonusItems = all.filter(t => t.type==='in' && /^حافز/.test(t.note||''));
+                        const halfItems = all.filter(t => t.type==='out' && /^خصم نصف يوم/.test(t.note||''));
+                        const deductItems = all.filter(t => t.type==='out' && !/^خصم نصف يوم/.test(t.note||''));
                         const Line = ({label, value, extra, color}) => (
                             <div className="flex justify-between items-center py-2 border-b border-slate-100 text-sm">
                                 <span className="text-slate-700">{label}{extra ? <span className="text-slate-400 text-xs"> ({extra})</span> : null}</span>
