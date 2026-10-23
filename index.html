@@ -6,9 +6,9 @@
     <title>نظام الموظفين</title>
     
     <!-- React & Tailwind -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     
@@ -36,9 +36,15 @@
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&display=swap');
-        body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; user-select: none; }
+        body { font-family: 'Cairo', sans-serif; background-color: #f8fafc; user-select: none; -webkit-user-select: none; }
+        /* إصلاح: السماح بالكتابة داخل الحقول (user-select:none كان بيمنع الكتابة في سفاري/آيفون) */
+        input, textarea, select { user-select: text; -webkit-user-select: text; }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #4f46e5; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes pulseAnim { 0%, 100% { transform: scale(0.5); opacity: 0.1; } 50% { transform: scale(0.62); opacity: 0.2; } }
+        .pulse-animation { animation: pulseAnim 2s ease-in-out infinite; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.25s ease-out; }
         .emp-card { transition: all 0.2s; cursor: pointer; }
         .emp-card:active { transform: scale(0.95); }
         .modal-overlay { background-color: rgba(0,0,0,0.7); backdrop-filter: blur(5px); z-index: 50; }
@@ -60,6 +66,10 @@
         const DEFAULT_WORK_HOURS = 8;
         const DEFAULT_START_HOUR = 11;
 
+        // --- الأيام (getDay: الأحد = 0 ... السبت = 6) والترتيب المصري يبدأ بالسبت ---
+        const DAY_NAMES = { 0: 'الأحد', 1: 'الاثنين', 2: 'الثلاثاء', 3: 'الأربعاء', 4: 'الخميس', 5: 'الجمعة', 6: 'السبت' };
+        const WEEK_ORDER = [6, 0, 1, 2, 3, 4, 5];
+
         // --- الأيقونات ---
         const Icons = {
             Cloud: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19"/><path d="M5 19c0-4 4-8 8-8s8 4 8 8"/><path d="M12 3v8"/></svg>,
@@ -77,7 +87,8 @@
             Wallet: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" /></svg>,
             Eye: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>,
             EyeOff: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>,
-            Camera: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+            Camera: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>,
+            Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
         };
 
         // تنسيق الوقت ثابت: 12 ساعة + ص/م
@@ -88,6 +99,55 @@
             const ampm = h >= 12 ? 'م' : 'ص';
             h = h % 12 || 12;
             return `${h}:${m}:${s} ${ampm}`;
+        };
+
+        // تحويل "HH:MM" (24 ساعة) إلى 12 ساعة + ص/م
+        const fmt12 = (hhmm) => {
+            if (!hhmm) return '';
+            const [h, m] = String(hhmm).split(':').map(Number);
+            const ampm = h >= 12 ? 'م' : 'ص';
+            const hh = h % 12 || 12;
+            return `${hh}:${String(m || 0).padStart(2, '0')} ${ampm}`;
+        };
+
+        // ✅ إصلاح: التاريخ المحلي (toISOString كان بيرجع تاريخ UTC فيغلط بعد منتصف الليل بتوقيت مصر)
+        const localDateStr = (d = new Date()) => {
+            const p = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+        };
+
+        // هل التاريخ المخزّن هو اليوم؟ (يدعم الصيغ القديمة)
+        const isToday = (dateStr) => {
+            if (!dateStr) return false;
+            const today = localDateStr();
+            if (dateStr === today) return true;
+            try {
+                const d = new Date(dateStr);
+                if (!isNaN(d.getTime()) && localDateStr(d) === today) return true;
+            } catch (e) {}
+            return dateStr === new Date().toLocaleDateString();
+        };
+
+        // --- جدول المواعيد ---
+        const getDaySchedule = (u, date = new Date()) => (u && u.schedule && u.schedule[String(date.getDay())]) || null;
+
+        // موعد بداية الوردية (+5 دقائق سماح) أو إجازة. لو مفيش جدول لليوم يرجع للافتراضي (11 ص).
+        const getShiftStart = (u, date = new Date()) => {
+            const s = getDaySchedule(u, date);
+            const d = new Date(date);
+            if (s) {
+                if (s.off) return { off: true, start: null };
+                const [h, m] = String(s.from || '').split(':').map(Number);
+                if (!isNaN(h)) { d.setHours(h, (m || 0) + 5, 0, 0); return { off: false, start: d }; }
+            }
+            d.setHours(u.workStartHour || DEFAULT_START_HOUR, 5, 0, 0);
+            return { off: false, start: d };
+        };
+
+        const todayShiftText = (u) => {
+            const s = getDaySchedule(u);
+            if (!s) return null;
+            return s.off ? 'إجازة اليوم 🌴' : `اليوم: ${fmt12(s.from)} - ${fmt12(s.to)}`;
         };
 
         const toWhatsApp = (num) => {
@@ -115,37 +175,52 @@
             const [loading, setLoading] = useState(true);
             const [dbError, setDbError] = useState(false);
 
+            // ✅ إصلاح: اشتراك واحد في قاعدة البيانات (كان بيتعمل من جديد مع كل تسجيل دخول/خروج)
+            // + انتظار تحميل Firebase بدل ما يظهر خطأ لو اتأخر
             useEffect(() => {
-                if (!window.db) { setDbError(true); setLoading(false); return; }
-                const { collection, onSnapshot, query, setDoc, doc } = window.dbMethods;
-                
-                const unsubscribe = onSnapshot(query(collection(window.db, "users")), (snapshot) => {
-                    const fetchedUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    if (fetchedUsers.length === 0 || !fetchedUsers.find(u => u.id === 'admin')) {
-                        setDoc(doc(window.db, "users", "admin"), INITIAL_ADMIN);
+                let unsubscribe = null;
+                let cancelled = false;
+                let tries = 0;
+
+                const start = () => {
+                    if (cancelled) return;
+                    if (!window.db) {
+                        if (tries++ < 50) { setTimeout(start, 100); return; }
+                        setDbError(true); setLoading(false); return;
                     }
-                    setUsers(fetchedUsers);
-                    if (currentUser) {
-                        const me = fetchedUsers.find(u => u.id === currentUser.id);
-                        if (me) setCurrentUser(me);
-                    }
-                    setLoading(false);
-                }, (error) => {
-                    console.error("Connection Error:", error);
-                    setDbError(true);
-                    setLoading(false);
-                });
-                return () => unsubscribe();
-            }, [currentUser?.id]);
+                    const { collection, onSnapshot, query, setDoc, doc } = window.dbMethods;
+                    unsubscribe = onSnapshot(query(collection(window.db, "users")), (snapshot) => {
+                        const fetchedUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                        if (fetchedUsers.length === 0 || !fetchedUsers.find(u => u.id === 'admin')) {
+                            setDoc(doc(window.db, "users", "admin"), INITIAL_ADMIN);
+                        }
+                        setUsers(fetchedUsers);
+                        setCurrentUser(prev => {
+                            if (!prev) return prev;
+                            const me = fetchedUsers.find(u => u.id === prev.id);
+                            return me || prev;
+                        });
+                        setLoading(false);
+                    }, (error) => {
+                        console.error("Connection Error:", error);
+                        setDbError(true);
+                        setLoading(false);
+                    });
+                };
+                start();
+                return () => { cancelled = true; if (unsubscribe) unsubscribe(); };
+            }, []);
 
             const updateCloud = async (id, data) => {
-                try { await window.dbMethods.updateDoc(window.dbMethods.doc(window.db, "users", id), data); } catch(e) { console.error(e); }
+                try { await window.dbMethods.updateDoc(window.dbMethods.doc(window.db, "users", id), data); } catch(e) { console.error(e); alert("تعذر الحفظ، تأكد من الإنترنت وحاول مرة أخرى"); }
             };
             const addToCloud = async (userData) => {
-                try { await window.dbMethods.setDoc(window.dbMethods.doc(window.db, "users", userData.id), userData); } catch(e) { console.error(e); }
+                try { await window.dbMethods.setDoc(window.dbMethods.doc(window.db, "users", userData.id), userData); } catch(e) { console.error(e); alert("تعذر الحفظ، تأكد من الإنترنت وحاول مرة أخرى"); }
             };
             const deleteFromCloud = async (id) => {
-                if(confirm("حذف نهائي؟")) await window.dbMethods.deleteDoc(window.dbMethods.doc(window.db, "users", id));
+                if(confirm("حذف نهائي؟")) {
+                    try { await window.dbMethods.deleteDoc(window.dbMethods.doc(window.db, "users", id)); } catch(e) { console.error(e); alert("تعذر الحذف"); }
+                }
             };
 
             if (dbError) return <div className="h-screen flex flex-col items-center justify-center text-slate-500"><Icons.WifiOff /><p className="mt-2">تأكد من إعدادات قاعدة البيانات</p></div>;
@@ -160,36 +235,28 @@
             const [selected, setSelected] = useState(null);
             const [pass, setPass] = useState('');
             const [clicks, setClicks] = useState(0);
+            const clickTimer = useRef(null);
             
             const employees = users.filter(u => u.role === 'employee');
             const admin = users.find(u => u.role === 'admin');
 
+            // ✅ إصلاح: عدّاد الضغطات بيتصفّر بعد ثانيتين (كان بيتراكم على مدار اليوم)
             const handleAdmin = () => {
-                const c = clicks + 1; setClicks(c);
-                if(c === 3) { setSelected(admin); setClicks(0); }
+                const c = clicks + 1;
+                clearTimeout(clickTimer.current);
+                if (c >= 3) { setSelected(admin); setClicks(0); return; }
+                setClicks(c);
+                clickTimer.current = setTimeout(() => setClicks(0), 2000);
             };
 
             const login = (e) => {
                 e.preventDefault();
                 if (selected && pass === selected.password) {
+                    setPass('');
                     onLogin(selected);
                 } else {
                     alert("خطأ في كلمة المرور");
                 }
-            };
-
-            // دالة للتحقق مما إذا كان التاريخ هو اليوم (ثابتة مهما كان شكل الجهاز)
-            const getTodayStr = () => new Date().toISOString().split('T')[0];
-            const isToday = (dateStr) => {
-                if (!dateStr) return false;
-                const today = getTodayStr();
-                if (dateStr === today) return true;
-                // دعم الصيغ القديمة
-                try {
-                    const d = new Date(dateStr);
-                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
-                } catch(e) {}
-                return dateStr === new Date().toLocaleDateString();
             };
 
             return (
@@ -205,7 +272,7 @@
                                 {emp.photo ? (
                                     <img src={emp.photo} alt={emp.name} className="w-16 h-16 rounded-full object-cover border-2 border-indigo-100 mb-2" />
                                 ) : (
-                                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white mb-2 ${emp.isCheckedIn ? 'bg-green-500':'bg-slate-400'}`}>{emp.name[0]}</div>
+                                    <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white mb-2 ${emp.isCheckedIn ? 'bg-green-500':'bg-slate-400'}`}>{(emp.name||'?')[0]}</div>
                                 )}
                                 <span className="font-bold text-slate-700 text-sm text-center">{emp.name}</span>
                                 {emp.isCheckedIn && <span className="absolute top-2 right-2 w-3 h-3 bg-green-500 rounded-full border-2 border-white shadow"></span>}
@@ -275,31 +342,23 @@
             const handleAction = async () => {
                 try {
                     const now = new Date();
-                    const today = now.toISOString().split('T')[0];
-                    const isSameDay = (dateStr) => {
-                        if (!dateStr) return false;
-                        if (dateStr === today) return true;
-                        try {
-                            const d = new Date(dateStr);
-                            if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
-                        } catch(e) {}
-                        return dateStr === now.toLocaleDateString();
-                    };
 
                     if (!user.isCheckedIn) {
-                        if (isSameDay(user.lastCheckInDate)) {
+                        if (isToday(user.lastCheckInDate)) {
                             setErrorMsg("لقد قمت بالحضور بالفعل اليوم");
                             setTimeout(() => setErrorMsg(''), 3000);
                             return;
                         }
+                        // تنبيه لو اليوم إجازة حسب جدول المواعيد
+                        if (getShiftStart(user, now).off && !confirm("اليوم إجازتك حسب جدول المواعيد.\nهل تريد تسجيل الحضور؟")) return;
                         processAttendance(true);
                     } else {
-                        if (isSameDay(user.lastCheckOutDate)) {
+                        if (isToday(user.lastCheckOutDate)) {
                             alert("تم تسجيل الانصراف مسبقاً");
                             return;
                         }
                         // لو نسي انصراف يوم سابق
-                        if (user.lastCheckInDate && !isSameDay(user.lastCheckInDate)) {
+                        if (user.lastCheckInDate && !isToday(user.lastCheckInDate)) {
                             const time = prompt(`نسيت تسجل انصراف أمس (${user.lastCheckInDate})\nاكتب معاد الانصراف (مثال: 7:30 PM)`);
                             if (!time) return;
                             const updates = {
@@ -332,7 +391,7 @@
                 setLoading(true);
                 try {
                     const now = new Date();
-                    const today = now.toISOString().split('T')[0];
+                    const today = localDateStr(now);
                     let updates = { isCheckedIn: isCheckIn };
                     if (updatedDamages) updates.damages = updatedDamages;
 
@@ -340,10 +399,9 @@
                         const pay = user.dailyRate || 0;
                         updates = { ...updates, lastCheckInDate: today, lastCheckInTime: formatTime(now), checkInTimestamp: now.getTime(), attendanceDays: (Number(user.attendanceDays)||0)+1, currentBalance: (Number(user.currentBalance)||0)+pay, transactions: [{date: now.toLocaleString(), type:'in', amount:pay, note:'راتب يومي'}, ...(user.transactions||[])] };
                         
-                        // حساب التأخير
-                        const workStart = new Date();
-                        workStart.setHours(user.workStartHour || DEFAULT_START_HOUR, 5, 0, 0);
-                        if (now > workStart) {
+                        // حساب التأخير (حسب جدول مواعيد اليوم، أو 11 ص لو مفيش جدول)
+                        const shift = getShiftStart(user, now);
+                        if (!shift.off && now > shift.start) {
                             updates.lateCount = (Number(user.lateCount)||0) + 1;
                         }
                         
@@ -410,8 +468,8 @@
 
                     <div className="p-6 text-center pt-8 pb-24">
                         {tab === 'home' && (
-                            <div className="flex justify-center">
-                                {!user.isCheckedIn && !loading && <div className="absolute inset-0 bg-indigo-500 rounded-full opacity-10 pulse-animation scale-50 z-0"></div>}
+                            <div className="flex justify-center relative">
+                                {!user.isCheckedIn && !loading && <div className="absolute inset-0 bg-indigo-500 rounded-full pulse-animation z-0"></div>}
                                 <button onClick={handleAction} disabled={loading} className={`w-48 h-48 rounded-full border-4 shadow-2xl flex flex-col items-center justify-center mx-auto transition-all relative z-10 ${user.isCheckedIn ? 'bg-white border-red-500 text-red-500' : 'bg-indigo-600 border-indigo-200 text-white'}`}>
                                     {loading ? <div className="loader"></div> : (user.isCheckedIn ? <><Icons.LogOut /><span className="text-2xl font-bold mt-2">انصراف</span></> : <><Icons.Fingerprint /><span className="text-2xl font-bold mt-2">حضور</span></>)}
                                 </button>
@@ -425,8 +483,9 @@
                                     <button onClick={()=>setShowAddDmg(true)} className="bg-red-50 text-red-600 py-3 rounded-xl font-bold text-xs border border-red-200">إضافة خصم</button>
                                     <button onClick={()=>{
                                         if(!confirm("هل انت متأكد من انك اليوم Over time؟")) return;
-                                        const today = new Date().toISOString().split('T')[0];
-                                        if((user.overtimeRequests||[]).some(r => r.date === today && !r.status)) return;
+                                        const today = localDateStr();
+                                        // ✅ إصلاح: كان بيسمح بطلب ثاني في نفس اليوم لو الطلب الأول اتوافق عليه
+                                        if((user.overtimeRequests||[]).some(r => r.date === today)) { alert("تم تسجيل طلب Over time لليوم بالفعل"); return; }
                                         const reqs = [{date: today, status: null}, ...(user.overtimeRequests||[])];
                                         onUpdate(user.id, {overtimeRequests: reqs});
                                         alert(`شكراً ${user.name} يا بطل 💪`);
@@ -526,6 +585,9 @@
             const [showReport, setShowReport] = useState(null);
             const [eventsFor, setEventsFor] = useState(null);
             const [dmgCost, setDmgCost] = useState({});
+            // جدول المواعيد
+            const [scheduleFor, setScheduleFor] = useState(null);
+            const [scheduleDraft, setScheduleDraft] = useState({});
             
             const employees = users.filter(u => u.role === 'employee');
             const admin = users.find(u => u.role === 'admin');
@@ -579,6 +641,52 @@
                 setEditingUser(null);
             };
 
+            // ---------- جدول مواعيد الموظف ----------
+            const openSchedule = (emp) => {
+                const defFrom = `${String(DEFAULT_START_HOUR).padStart(2, '0')}:00`;
+                const endH = (DEFAULT_START_HOUR + (Number(emp.targetHours) || DEFAULT_WORK_HOURS)) % 24;
+                const defTo = `${String(endH).padStart(2, '0')}:00`;
+                const draft = {};
+                for (let d = 0; d < 7; d++) {
+                    const s = emp.schedule && emp.schedule[String(d)];
+                    draft[d] = s ? { off: !!s.off, from: s.from || defFrom, to: s.to || defTo } : { off: false, from: defFrom, to: defTo };
+                }
+                setScheduleDraft(draft);
+                setScheduleFor(emp);
+            };
+
+            const setDay = (d, patch) => setScheduleDraft(prev => ({ ...prev, [d]: { ...prev[d], ...patch } }));
+
+            // نسخ أوقات أول يوم عمل لباقي أيام العمل
+            const copyFirstToAll = () => {
+                const first = WEEK_ORDER.find(d => !scheduleDraft[d].off);
+                if (first === undefined) return;
+                const { from, to } = scheduleDraft[first];
+                setScheduleDraft(prev => {
+                    const n = { ...prev };
+                    WEEK_ORDER.forEach(d => { if (!n[d].off) n[d] = { ...n[d], from, to }; });
+                    return n;
+                });
+            };
+
+            const saveSchedule = () => {
+                for (const d of WEEK_ORDER) {
+                    const s = scheduleDraft[d];
+                    if (!s.off) {
+                        if (!s.from || !s.to) return alert(`حدد وقت البداية والنهاية ليوم ${DAY_NAMES[d]}`);
+                        if (s.to <= s.from) return alert(`وقت النهاية لازم يكون بعد وقت البداية ليوم ${DAY_NAMES[d]}`);
+                    }
+                }
+                const schedule = {};
+                WEEK_ORDER.forEach(d => {
+                    const s = scheduleDraft[d];
+                    schedule[String(d)] = s.off ? { off: true } : { off: false, from: s.from, to: s.to };
+                });
+                const notif = { id: Date.now(), msg: 'تم تحديث جدول مواعيد عملك', date: new Date().toLocaleString() };
+                onUpdate(scheduleFor.id, { schedule, notifications: [notif, ...(scheduleFor.notifications || [])] });
+                setScheduleFor(null);
+            };
+
             const addTransaction = (emp, amount, note) => {
                 const newTrans = { date: new Date().toLocaleString(), amount, note, type: amount > 0 ? 'in' : 'out' };
                 onUpdate(emp.id, { currentBalance: (Number(emp.currentBalance)||0) + amount, transactions: [newTrans, ...(emp.transactions || [])] });
@@ -602,7 +710,7 @@
                 if (/Overtime|over time|أوفر/i.test(t.note || '')) {
                     const reqs = [...(emp.overtimeRequests || [])];
                     const ri = reqs.findIndex(r => r.status === 'approved' && (t.note || '').includes(r.date));
-                    if (ri >= 0) reqs[ri].status = null;
+                    if (ri >= 0) reqs[ri] = { ...reqs[ri], status: null };
                     updates.overtimeRequests = reqs;
                 }
                 onUpdate(emp.id, updates);
@@ -610,11 +718,14 @@
                 setEventsFor(prev => prev && prev.id === emp.id ? { ...prev, ...updates, transactions: list } : prev);
             };
 
+            // ✅ إصلاح: سعر التلفيات كان مشترك بين كل الموظفين (مفتاحه رقم التلف فقط) فبيتخصم سعر موظف تاني
             const resolveDamage = (emp, idx) => {
-                const cost = parseFloat(dmgCost[idx]); if(!cost) return;
-                const newDamages = [...emp.damages]; newDamages[idx].status = 'resolved'; newDamages[idx].cost = cost;
+                const key = `${emp.id}-${idx}`;
+                const cost = parseFloat(dmgCost[key]); if(!cost) return;
+                const newDamages = [...emp.damages]; newDamages[idx] = { ...newDamages[idx], status: 'resolved', cost };
                 addTransaction(emp, -cost, `تلفيات: ${newDamages[idx].desc}`);
                 onUpdate(emp.id, { damages: newDamages });
+                setDmgCost(prev => { const n = { ...prev }; delete n[key]; return n; });
             };
 
             const updateAdminPass = () => {
@@ -623,26 +734,12 @@
                 setShowPassModal(false); alert("تم التغيير");
             };
 
-            // دالة مساعدة لتحديد ما إذا كان اليوم هو تاريخ معين
-            const getTodayStr = () => new Date().toISOString().split('T')[0];
-            const isToday = (dateStr) => {
-                if (!dateStr) return false;
-                const today = getTodayStr();
-                if (dateStr === today) return true;
-                try {
-                    const d = new Date(dateStr);
-                    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0] === today;
-                } catch(e) {}
-                return dateStr === new Date().toLocaleDateString();
-            };
-
-            // دالة لحساب التأخير
+            // دالة لحساب التأخير (حسب جدول مواعيد يوم الحضور)
             const checkLateStatus = (emp) => {
                 if (!emp.checkInTimestamp || !isToday(emp.lastCheckInDate)) return null;
                 const checkInDate = new Date(emp.checkInTimestamp);
-                const workStart = new Date();
-                workStart.setHours(emp.workStartHour || DEFAULT_START_HOUR, 5, 0, 0);
-                return checkInDate > workStart;
+                const shift = getShiftStart(emp, checkInDate);
+                return !shift.off && checkInDate > shift.start;
             };
 
             return (
@@ -679,11 +776,12 @@
                     <div className="space-y-4">
                         {employees.map(emp => {
                             const isLate = checkLateStatus(emp);
+                            const shiftText = todayShiftText(emp);
                             return (
                             <div key={emp.id} className="bg-white p-4 rounded-xl shadow border border-slate-200">
                                 <div className="flex justify-between items-center mb-2">
                                     <div className="flex items-center gap-3">
-                                        {emp.photo ? <img src={emp.photo} className="w-10 h-10 rounded-full object-cover" /> : <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${emp.isCheckedIn ? 'bg-green-500' : 'bg-slate-300'}`}>{emp.name[0]}</div>}
+                                        {emp.photo ? <img src={emp.photo} className="w-10 h-10 rounded-full object-cover" /> : <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${emp.isCheckedIn ? 'bg-green-500' : 'bg-slate-300'}`}>{(emp.name||'?')[0]}</div>}
                                         <div>
                                             <h3 className="font-bold text-lg flex items-center gap-2">
                                                 {emp.name}
@@ -693,9 +791,11 @@
                                                 {(isToday(emp.lastCheckInDate) || emp.isCheckedIn) && emp.lastCheckInTime && <span className="text-green-600 ml-2">دخول: {emp.lastCheckInTime}</span>}
                                                 {isToday(emp.lastCheckOutDate) && emp.lastCheckOutTime && <span className="text-red-500">خروج: {emp.lastCheckOutTime}</span>}
                                             </div>
+                                            {shiftText && <div className="text-[10px] text-teal-700 mt-0.5 font-bold">{shiftText}</div>}
                                         </div>
                                     </div>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-2 items-center">
+                                        <button onClick={()=>openSchedule(emp)} className="text-teal-600" title="جدول المواعيد"><Icons.Calendar /></button>
                                         <button onClick={()=>setEditingUser(emp)} className="text-blue-500"><Icons.Edit /></button>
                                         <button onClick={()=>setShowReport(emp)} className="text-indigo-500"><Icons.Report /></button>
                                         <button onClick={()=>setEventsFor(emp)} className="text-slate-600 text-xs font-bold px-2 py-1 bg-slate-100 rounded">سجل</button>
@@ -708,14 +808,14 @@
                                 </div>
                                 
                                 {emp.damages?.map((d, i) => !d.status && (
-                                    <div key={i} className="bg-red-50 p-2 mb-2 rounded flex justify-between items-center border border-red-100"><span className="text-xs text-red-600 font-bold">⚠️ {d.desc}</span><div className="flex gap-1"><input type="number" placeholder="سعر" className="w-16 p-1 text-xs border rounded" onChange={e => setDmgCost({...dmgCost, [i]: e.target.value})} /><button onClick={() => resolveDamage(emp, i)} className="bg-red-600 text-white px-2 py-1 text-xs rounded">خصم</button></div></div>
+                                    <div key={i} className="bg-red-50 p-2 mb-2 rounded flex justify-between items-center border border-red-100"><span className="text-xs text-red-600 font-bold">⚠️ {d.desc}</span><div className="flex gap-1"><input type="number" placeholder="سعر" className="w-16 p-1 text-xs border rounded" value={dmgCost[`${emp.id}-${i}`] || ''} onChange={e => setDmgCost({...dmgCost, [`${emp.id}-${i}`]: e.target.value})} /><button onClick={() => resolveDamage(emp, i)} className="bg-red-600 text-white px-2 py-1 text-xs rounded">خصم</button></div></div>
                                 ))}
                                 {emp.overtimeRequests?.map((r, i) => !r.status && (
                                     <div key={i} className="bg-purple-50 p-2 mb-2 rounded flex justify-between items-center border border-purple-100">
                                         <span className="text-xs text-purple-700 font-bold">Overtime: {r.date}</span>
                                         <button onClick={()=>{
                                             const reqs = [...(emp.overtimeRequests||[])];
-                                            reqs[i].status = 'approved';
+                                            reqs[i] = { ...reqs[i], status: 'approved' };
                                             const extra = emp.dailyRate || 0;
                                             addTransaction(emp, extra, `Overtime: ${r.date}`);
                                             onUpdate(emp.id, {overtimeRequests: reqs});
@@ -725,14 +825,61 @@
 
                                 <div className="grid grid-cols-2 gap-2 mt-2">
                                     <button onClick={()=>{ if(confirm("تأكيد خصم نصف يوم؟")) addTransaction(emp, -(emp.dailyRate/2 || 0), "خصم نصف يوم"); }} className="text-xs bg-red-50 text-red-600 py-2 rounded font-bold">خصم نصف يوم</button>
-                                    <button onClick={()=>{const v=prompt("أيام:"); if(v) addTransaction(emp, parseFloat(v)*emp.dailyRate, `إضافة ${v} أيام`)}} className="text-xs bg-blue-50 text-blue-600 py-2 rounded font-bold">+ أيام عمل</button>
-                                    <button onClick={()=>{const v=prompt("حافز:"); if(v) addTransaction(emp, parseFloat(v), "حافز")}} className="text-xs bg-green-50 text-green-600 py-2 rounded font-bold">حافز</button>
-                                    <button onClick={()=>{const d=prompt("وصف الخصم:"); if(d){const cost=prompt("السعر:"); if(cost){const dmgs=[{date:new Date().toLocaleString(),desc:d,status:'resolved',cost:parseFloat(cost)},...(emp.damages||[])]; addTransaction(emp, -parseFloat(cost), `خصم: ${d}`); onUpdate(emp.id,{damages:dmgs});}}}} className="text-xs bg-red-100 text-red-700 py-2 rounded font-bold">+ خصم جديد</button>
-                                    <div className="col-span-2 flex gap-1"><button onClick={()=>{ if(confirm("تصفير؟")) onUpdate(emp.id, {currentBalance:0, lateCount:0, earlyLeaveCount:0, attendanceDays:0, damages:[], transactions:[], overtimeRequests:[]}); }} className="flex-1 text-xs bg-slate-800 text-white py-2 rounded font-bold">تصفير (قبض)</button><button onClick={()=>{ if(confirm("حذف؟")) onDelete(emp.id); }} className="px-3 text-xs bg-red-100 text-red-600 rounded font-bold">حذف</button></div>
+                                    <button onClick={()=>{const v=prompt("أيام:"); if(v && !isNaN(parseFloat(v))) addTransaction(emp, parseFloat(v)*emp.dailyRate, `إضافة ${v} أيام`)}} className="text-xs bg-blue-50 text-blue-600 py-2 rounded font-bold">+ أيام عمل</button>
+                                    <button onClick={()=>{const v=prompt("حافز:"); if(v && !isNaN(parseFloat(v))) addTransaction(emp, parseFloat(v), "حافز")}} className="text-xs bg-green-50 text-green-600 py-2 rounded font-bold">حافز</button>
+                                    <button onClick={()=>{const d=prompt("وصف الخصم:"); if(d){const cost=prompt("السعر:"); if(cost && !isNaN(parseFloat(cost))){const dmgs=[{date:new Date().toLocaleString(),desc:d,status:'resolved',cost:parseFloat(cost)},...(emp.damages||[])]; addTransaction(emp, -parseFloat(cost), `خصم: ${d}`); onUpdate(emp.id,{damages:dmgs});}}}} className="text-xs bg-red-100 text-red-700 py-2 rounded font-bold">+ خصم جديد</button>
+                                    <div className="col-span-2 flex gap-1"><button onClick={()=>{ if(confirm("تصفير؟")) onUpdate(emp.id, {currentBalance:0, lateCount:0, earlyLeaveCount:0, attendanceDays:0, damages:[], transactions:[], overtimeRequests:[]}); }} className="flex-1 text-xs bg-slate-800 text-white py-2 rounded font-bold">تصفير (قبض)</button><button onClick={()=>onDelete(emp.id)} className="px-3 text-xs bg-red-100 text-red-600 rounded font-bold">حذف</button></div>
                                 </div>
                             </div>
                         )})}
                     </div>
+
+                    {scheduleFor && (
+                        <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4 z-50">
+                            <div className="bg-white w-full max-w-md rounded-xl shadow-2xl p-4 max-h-[90vh] overflow-y-auto animate-fade-in">
+                                <div className="flex justify-between items-center mb-3">
+                                    <h3 className="font-bold text-lg flex items-center gap-2 text-teal-700"><Icons.Calendar /> جدول مواعيد: {scheduleFor.name}</h3>
+                                    <button onClick={()=>setScheduleFor(null)} className="text-slate-500 text-2xl leading-none">×</button>
+                                </div>
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="text-xs text-slate-500 border-b">
+                                            <th className="py-2 text-right">اليوم</th>
+                                            <th className="py-2 text-center">إجازة</th>
+                                            <th className="py-2 text-center">من</th>
+                                            <th className="py-2 text-center">إلى</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {WEEK_ORDER.map(d => {
+                                            const s = scheduleDraft[d];
+                                            if (!s) return null;
+                                            return (
+                                                <tr key={d} className={`border-b ${s.off ? 'bg-red-50' : ''}`}>
+                                                    <td className="py-2 font-bold text-slate-700">{DAY_NAMES[d]}</td>
+                                                    <td className="py-2 text-center">
+                                                        <input type="checkbox" className="w-5 h-5 accent-red-500" checked={s.off} onChange={e=>setDay(d, { off: e.target.checked })} />
+                                                    </td>
+                                                    <td className="py-2 px-1">
+                                                        <input type="time" disabled={s.off} value={s.from} onChange={e=>setDay(d, { from: e.target.value })} className="border rounded p-1 text-xs w-full disabled:opacity-30 disabled:bg-slate-100" />
+                                                    </td>
+                                                    <td className="py-2 px-1">
+                                                        <input type="time" disabled={s.off} value={s.to} onChange={e=>setDay(d, { to: e.target.value })} className="border rounded p-1 text-xs w-full disabled:opacity-30 disabled:bg-slate-100" />
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                                <button onClick={copyFirstToAll} className="w-full mt-3 text-xs bg-teal-50 text-teal-700 py-2 rounded font-bold border border-teal-200">نسخ أوقات أول يوم عمل لباقي أيام العمل</button>
+                                <p className="text-[10px] text-slate-400 mt-2 text-center">التأخير بيتحسب على مواعيد اليوم (سماح 5 دقايق)، ولو اليوم إجازة مفيش تأخير.</p>
+                                <div className="flex gap-2 mt-3">
+                                    <button onClick={()=>setScheduleFor(null)} className="flex-1 bg-slate-100 py-2 rounded font-bold">إلغاء</button>
+                                    <button onClick={saveSchedule} className="flex-1 bg-teal-600 text-white py-2 rounded font-bold">حفظ الجدول</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {editingUser && (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4">
@@ -801,7 +948,7 @@
                         );
                         return (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4">
-                            <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl overflow-hidden">
+                            <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl overflow-hidden max-h-[95vh] overflow-y-auto">
                             <div id="receipt-to-save" className="bg-white p-5">
                                 <h2 className="text-center font-black text-xl">كشف حساب</h2>
                                 <h3 className="text-center font-bold text-indigo-700 mb-1">{showReport.name}</h3>
@@ -867,7 +1014,7 @@ ${deductLines}
                                                     link.click();
                                                     openText();
                                                 }, 'image/png');
-                                            });
+                                            }).catch(() => openText());
                                         } else openText();
                                     }} className="w-full bg-green-600 text-white py-2 rounded font-bold text-sm">إرسال واتساب + صورة</button>
                                     <div className="flex gap-2">
@@ -907,4 +1054,3 @@ ${deductLines}
     </script>
 </body>
 </html>
-
