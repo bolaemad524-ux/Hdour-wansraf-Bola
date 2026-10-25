@@ -150,6 +150,60 @@
             return s.off ? 'إجازة اليوم 🌴' : `اليوم: ${fmt12(s.from)} - ${fmt12(s.to)}`;
         };
 
+        const isDailyPay = (note) => String(note || '').startsWith('راتب يومي');
+        const tomorrowStr = () => { const d = new Date(); d.setDate(d.getDate() + 1); return localDateStr(d); };
+        const dateLabel = (str) => { const [y, m, d] = String(str).split('-').map(Number); return `${DAY_NAMES[new Date(y, m - 1, d).getDay()]} ${str}`; };
+        const toMins = (hhmm) => { const [h, m] = String(hhmm || '').split(':').map(Number); return isNaN(h) ? null : h * 60 + (m || 0); };
+
+        // هل شيفت الموظف ده يخص الوقت الحالي؟ (من ساعة قبل البداية لحد النهاية)
+        const shiftCoversNow = (u, now = new Date()) => {
+            const s = getDaySchedule(u, now);
+            if (!s || s.off) return false;
+            const f = toMins(s.from), t = toMins(s.to);
+            if (f === null || t === null) return false;
+            const mins = now.getHours() * 60 + now.getMinutes();
+            return mins >= f - 60 && mins < t;
+        };
+
+        // 'ok' = في موعده | 'off' = يوم إجازته | 'outside' = خارج موعده (قبل البداية بأكتر من ساعة، أو بعد منتصف الشيفت، أو بعد النهاية)
+        // لو مفيش جدول لليوم: 'ok' (مفيش سؤال)
+        const classifyArrival = (u, now = new Date()) => {
+            const s = getDaySchedule(u, now);
+            if (!s) return 'ok';
+            if (s.off) return 'off';
+            const f = toMins(s.from), t = toMins(s.to);
+            if (f === null || t === null) return 'ok';
+            const mins = now.getHours() * 60 + now.getMinutes();
+            if (mins < f - 60 || mins >= t || mins >= f + (t - f) / 2) return 'outside';
+            return 'ok';
+        };
+
+        // أيام الغياب: يوم شغل في الجدول مفيهوش أي تسجيل (حضور / بديل / اتغطى / مُبرَّر)، من تاريخ بداية التتبع لحد دلوقتي
+        const calcAbsences = (emp) => {
+            if (!emp.schedule || !emp.absenceStart) return [];
+            const seen = new Set((emp.attendanceLog || []).map(l => l.date));
+            if (emp.lastCheckInDate) seen.add(emp.lastCheckInDate);
+            const now = new Date();
+            const todayStr = localDateStr(now);
+            const [y, m, dd] = String(emp.absenceStart).split('-').map(Number);
+            const d = new Date(y, m - 1, dd);
+            const res = [];
+            for (let i = 0; i < 400 && localDateStr(d) <= todayStr; i++) {
+                const str = localDateStr(d);
+                const s = emp.schedule[String(d.getDay())];
+                if (s && !s.off && !seen.has(str)) {
+                    if (str < todayStr) res.push(str);
+                    else {
+                        // النهارده: يتحسب غياب بس لو الشيفت خلص ولسه ما سجلش
+                        const t = toMins(s.to);
+                        if (t !== null && now.getHours() * 60 + now.getMinutes() >= t) res.push(str);
+                    }
+                }
+                d.setDate(d.getDate() + 1);
+            }
+            return res;
+        };
+
         const toWhatsApp = (num) => {
             if (!num) return '';
             let n = String(num).replace(/\D/g, '');
@@ -160,7 +214,7 @@
         };
 
         const getTotalDays = (u) => {
-            const checkins = Number(u.attendanceDays) || (u.transactions||[]).filter(t => t.note === 'راتب يومي').length || 0;
+            const checkins = Number(u.attendanceDays) || (u.transactions||[]).filter(t => isDailyPay(t.note)).length || 0;
             const added = (u.transactions||[]).reduce((sum, t) => {
                 const m = String(t.note||'').match(/إضافة\s*([\d.]+)/);
                 return sum + (m ? Number(m[1]) : 0);
@@ -228,7 +282,7 @@
 
             if (!currentUser) return <KioskLogin users={users} onLogin={setCurrentUser} />;
             if (currentUser.role === 'admin') return <AdminDashboard users={users} onAdd={addToCloud} onUpdate={updateCloud} onDelete={deleteFromCloud} onLogout={()=>setCurrentUser(null)} />;
-            return <EmployeeApp user={currentUser} onUpdate={updateCloud} onLogout={()=>setCurrentUser(null)} />;
+            return <EmployeeApp user={currentUser} users={users} onUpdate={updateCloud} onLogout={()=>setCurrentUser(null)} />;
         };
 
         const KioskLogin = ({ users, onLogin }) => {
@@ -307,7 +361,9 @@
             );
         };
 
-        const EmployeeApp = ({ user, onUpdate, onLogout }) => {
+        const EmployeeApp = ({ user, users = [], onUpdate, onLogout }) => {
+            const [subMode, setSubMode] = useState(null); // null | 'off' | 'outside' | 'manual'
+            const [showAllSub, setShowAllSub] = useState(false);
             const [tab, setTab] = useState('home');
             const [loading, setLoading] = useState(false);
             const [showDmg, setShowDmg] = useState(false);
@@ -349,8 +405,9 @@
                             setTimeout(() => setErrorMsg(''), 3000);
                             return;
                         }
-                        // تنبيه لو اليوم إجازة حسب جدول المواعيد
-                        if (getShiftStart(user, now).off && !confirm("اليوم إجازتك حسب جدول المواعيد.\nهل تريد تسجيل الحضور؟")) return;
+                        // لو الحضور في غير موعده (أو يوم إجازته) نسأله هل هو بديل لموظف
+                        const arrival = classifyArrival(user, now);
+                        if (arrival !== 'ok') { setSubMode(arrival); return; }
                         processAttendance(true);
                     } else {
                         if (isToday(user.lastCheckOutDate)) {
@@ -387,7 +444,7 @@
                 setShowDmg(false); setHasDmg(null); setDesc('');
             };
 
-            const processAttendance = async (isCheckIn, updatedDamages = null) => {
+            const processAttendance = async (isCheckIn, updatedDamages = null, rep = null) => {
                 setLoading(true);
                 try {
                     const now = new Date();
@@ -397,11 +454,13 @@
 
                     if(isCheckIn) {
                         const pay = user.dailyRate || 0;
-                        updates = { ...updates, lastCheckInDate: today, lastCheckInTime: formatTime(now), checkInTimestamp: now.getTime(), attendanceDays: (Number(user.attendanceDays)||0)+1, currentBalance: (Number(user.currentBalance)||0)+pay, transactions: [{date: now.toLocaleString(), type:'in', amount:pay, note:'راتب يومي'}, ...(user.transactions||[])] };
+                        const payNote = rep ? `راتب يومي (بديل عن ${rep.name})` : 'راتب يومي';
+                        const logEntry = rep ? { date: today, type: 'sub', forId: rep.id, forName: rep.name } : { date: today, type: 'present' };
+                        updates = { ...updates, lastCheckInDate: today, lastCheckInTime: formatTime(now), checkInTimestamp: now.getTime(), attendanceDays: (Number(user.attendanceDays)||0)+1, currentBalance: (Number(user.currentBalance)||0)+pay, attendanceLog: [...(user.attendanceLog||[]), logEntry].slice(-400), transactions: [{date: now.toLocaleString(), type:'in', amount:pay, note: payNote}, ...(user.transactions||[])] };
                         
                         // حساب التأخير (حسب جدول مواعيد اليوم، أو 11 ص لو مفيش جدول)
                         const shift = getShiftStart(user, now);
-                        if (!shift.off && now > shift.start) {
+                        if (!rep && !shift.off && now > shift.start) {
                             updates.lateCount = (Number(user.lateCount)||0) + 1;
                         }
                         
@@ -414,6 +473,13 @@
                             `خليك نشيط يا ${user.name}، هتنور المكان ✨`
                         ];
                         const randomMsg = msgs[Math.floor(Math.random() * msgs.length)];
+                        if (rep) {
+                            const coverNotif = { id: Date.now(), msg: `تم تغطية موعدك اليوم بواسطة ${user.name}`, date: new Date().toLocaleString() };
+                            await onUpdate(rep.id, {
+                                attendanceLog: [...(rep.attendanceLog||[]), { date: today, type: 'covered', byId: user.id, byName: user.name }].slice(-400),
+                                notifications: [coverNotif, ...(rep.notifications||[])]
+                            });
+                        }
                         alert(`${randomMsg}\n\nلا تنسى ترشيد استهلاك الكهرباء اليوم ⚡`);
                     } else {
                         updates.lastCheckOutDate = today;
@@ -476,6 +542,12 @@
                             </div>
                         )}
 
+                        {tab === 'home' && !user.isCheckedIn && !isToday(user.lastCheckInDate) && (
+                            <div className="mt-8">
+                                <button onClick={()=>setSubMode('manual')} className="text-sm font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-4 py-2 rounded-full">🔄 أنا بديل لموظف آخر</button>
+                            </div>
+                        )}
+
                         {tab === 'wallet' && (
                             <div className="text-left space-y-4">
                                 <div className="grid grid-cols-3 gap-2">
@@ -533,6 +605,59 @@
                         <button onClick={()=>setTab('wallet')} className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all ${tab==='wallet'?'text-indigo-600 bg-indigo-50':'text-slate-400 hover:bg-slate-50'}`}><Icons.Wallet /> <span className="text-[10px] font-bold">حسابي</span></button>
                     </div>
 
+                    {subMode && (() => {
+                        const todayStr = localDateStr();
+                        const nowD = new Date();
+                        const others = (users || []).filter(u => u.role === 'employee' && u.id !== user.id && !(u.attendanceLog || []).some(l => l.date === todayStr && l.type === 'covered'));
+                        const guesses = subMode === 'manual' ? [] : others.filter(u => shiftCoversNow(u, nowD));
+                        const rest = others.filter(u => !guesses.includes(u));
+                        const mine = getDaySchedule(user, nowD);
+                        const reason = subMode === 'off'
+                            ? 'اليوم إجازتك حسب جدول المواعيد.'
+                            : subMode === 'outside'
+                                ? `حضورك دلوقتي مش في موعدك${mine && !mine.off ? ` (موعدك اليوم ${fmt12(mine.from)} - ${fmt12(mine.to)})` : ''}.`
+                                : '';
+                        const showList = subMode === 'manual' || showAllSub || guesses.length === 0;
+                        const closeSub = () => { setSubMode(null); setShowAllSub(false); };
+                        const pick = (rep) => { closeSub(); processAttendance(true, null, rep); };
+                        const tag = (u) => {
+                            const s = getDaySchedule(u, nowD);
+                            const st = s ? (s.off ? 'إجازة اليوم' : `${fmt12(s.from)} - ${fmt12(s.to)}`) : 'بدون جدول';
+                            return isToday(u.lastCheckInDate) ? `${st} • حضر` : st;
+                        };
+                        return (
+                            <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50 p-4">
+                                <div className="bg-white w-full max-w-xs p-5 rounded-2xl text-center max-h-[85vh] overflow-y-auto animate-fade-in">
+                                    {reason && <p className="text-xs text-orange-600 font-bold mb-2">{reason}</p>}
+                                    <h3 className="font-bold mb-4 text-lg">{guesses.length === 1 && !showList ? `هل أنت بديل للموظف ${guesses[0].name}؟` : 'أنت بديل لمين؟'}</h3>
+                                    <div className="space-y-2">
+                                        {guesses.map(u => (
+                                            <button key={u.id} onClick={()=>pick(u)} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold text-sm">
+                                                نعم، بديل لـ {u.name}
+                                                <span className="block text-[10px] font-normal opacity-80">{tag(u)}</span>
+                                            </button>
+                                        ))}
+                                        {showList && rest.map(u => (
+                                            <button key={u.id} onClick={()=>pick(u)} className="w-full bg-indigo-50 text-indigo-700 border border-indigo-200 py-2 rounded-xl font-bold text-sm">
+                                                {u.name}
+                                                <span className="block text-[10px] font-normal opacity-70">{tag(u)}</span>
+                                            </button>
+                                        ))}
+                                        {showList && others.length === 0 && <p className="text-xs text-slate-400">مفيش موظفين تانيين</p>}
+                                        {!showList && rest.length > 0 && (
+                                            <button onClick={()=>setShowAllSub(true)} className="w-full bg-slate-100 py-2 rounded-xl text-sm font-bold">موظف آخر</button>
+                                        )}
+                                    </div>
+                                    {subMode === 'manual' ? (
+                                        <button onClick={closeSub} className="w-full mt-4 bg-slate-100 py-3 rounded-xl font-bold">إلغاء</button>
+                                    ) : (
+                                        <button onClick={()=>{ closeSub(); processAttendance(true); }} className="w-full mt-4 bg-slate-900 text-white py-3 rounded-xl font-bold">لا، مش بديل لحد</button>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {showDmg && (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center z-50 p-4">
                             <div className="bg-white w-full max-w-xs p-6 rounded-2xl text-center">
@@ -588,6 +713,7 @@
             // جدول المواعيد
             const [scheduleFor, setScheduleFor] = useState(null);
             const [scheduleDraft, setScheduleDraft] = useState({});
+            const [absForId, setAbsForId] = useState(null);
             
             const employees = users.filter(u => u.role === 'employee');
             const admin = users.find(u => u.role === 'admin');
@@ -657,6 +783,12 @@
 
             const setDay = (d, patch) => setScheduleDraft(prev => ({ ...prev, [d]: { ...prev[d], ...patch } }));
 
+            // إلغاء غياب يوم (مبرَّر): بيتسجل في السجل فمايتحسبش غياب
+            const excuseAbsence = (emp, dateStr) => {
+                if (!confirm(`إلغاء غياب ${dateLabel(dateStr)}؟`)) return;
+                onUpdate(emp.id, { attendanceLog: [...(emp.attendanceLog || []), { date: dateStr, type: 'excused' }].slice(-400) });
+            };
+
             // نسخ أوقات أول يوم عمل لباقي أيام العمل
             const copyFirstToAll = () => {
                 const first = WEEK_ORDER.find(d => !scheduleDraft[d].off);
@@ -683,7 +815,7 @@
                     schedule[String(d)] = s.off ? { off: true } : { off: false, from: s.from, to: s.to };
                 });
                 const notif = { id: Date.now(), msg: 'تم تحديث جدول مواعيد عملك', date: new Date().toLocaleString() };
-                onUpdate(scheduleFor.id, { schedule, notifications: [notif, ...(scheduleFor.notifications || [])] });
+                onUpdate(scheduleFor.id, { schedule, ...(scheduleFor.absenceStart ? {} : { absenceStart: tomorrowStr() }), notifications: [notif, ...(scheduleFor.notifications || [])] });
                 setScheduleFor(null);
             };
 
@@ -703,7 +835,7 @@
                     currentBalance: (Number(emp.currentBalance) || 0) - Number(t.amount || 0)
                 };
                 // لو كان حضور يومي نقص العداد
-                if (t.note === 'راتب يومي') {
+                if (isDailyPay(t.note)) {
                     updates.attendanceDays = Math.max(0, (Number(emp.attendanceDays) || 0) - 1);
                 }
                 // لو كان أوفر تايم ألغِ الموافقة المطابقة
@@ -737,6 +869,7 @@
             // دالة لحساب التأخير (حسب جدول مواعيد يوم الحضور)
             const checkLateStatus = (emp) => {
                 if (!emp.checkInTimestamp || !isToday(emp.lastCheckInDate)) return null;
+                if ((emp.attendanceLog || []).some(l => l.date === localDateStr() && l.type === 'sub')) return null;
                 const checkInDate = new Date(emp.checkInTimestamp);
                 const shift = getShiftStart(emp, checkInDate);
                 return !shift.off && checkInDate > shift.start;
@@ -777,6 +910,10 @@
                         {employees.map(emp => {
                             const isLate = checkLateStatus(emp);
                             const shiftText = todayShiftText(emp);
+                            const absList = calcAbsences(emp);
+                            const todayLog = (emp.attendanceLog || []).filter(l => l.date === localDateStr());
+                            const subEntry = todayLog.find(l => l.type === 'sub');
+                            const covEntry = todayLog.find(l => l.type === 'covered');
                             return (
                             <div key={emp.id} className="bg-white p-4 rounded-xl shadow border border-slate-200">
                                 <div className="flex justify-between items-center mb-2">
@@ -792,6 +929,8 @@
                                                 {isToday(emp.lastCheckOutDate) && emp.lastCheckOutTime && <span className="text-red-500">خروج: {emp.lastCheckOutTime}</span>}
                                             </div>
                                             {shiftText && <div className="text-[10px] text-teal-700 mt-0.5 font-bold">{shiftText}</div>}
+                                            {subEntry && <div className="text-[10px] text-purple-700 mt-0.5 font-bold">🔄 بديل عن {subEntry.forName}</div>}
+                                            {covEntry && <div className="text-[10px] text-orange-600 mt-0.5 font-bold">🔄 اتغطى موعده بواسطة {covEntry.byName}</div>}
                                         </div>
                                     </div>
                                     <div className="flex gap-2 items-center">
@@ -807,6 +946,11 @@
                                     <span>المطلوب: {emp.targetHours} س</span>
                                 </div>
                                 
+                                {emp.schedule && (
+                                    <button onClick={()=>setAbsForId(emp.id)} className={`w-full text-xs py-1.5 rounded font-bold mb-2 border ${absList.length > 0 ? 'bg-red-50 text-red-700 border-red-100' : 'bg-slate-50 text-slate-500 border-slate-100'}`}>
+                                        {absList.length > 0 ? `🚫 غاب ${absList.length} يوم حتى الآن — اضغط للتفاصيل` : 'لا غياب مسجل ✅'}
+                                    </button>
+                                )}
                                 {emp.damages?.map((d, i) => !d.status && (
                                     <div key={i} className="bg-red-50 p-2 mb-2 rounded flex justify-between items-center border border-red-100"><span className="text-xs text-red-600 font-bold">⚠️ {d.desc}</span><div className="flex gap-1"><input type="number" placeholder="سعر" className="w-16 p-1 text-xs border rounded" value={dmgCost[`${emp.id}-${i}`] || ''} onChange={e => setDmgCost({...dmgCost, [`${emp.id}-${i}`]: e.target.value})} /><button onClick={() => resolveDamage(emp, i)} className="bg-red-600 text-white px-2 py-1 text-xs rounded">خصم</button></div></div>
                                 ))}
@@ -828,7 +972,7 @@
                                     <button onClick={()=>{const v=prompt("أيام:"); if(v && !isNaN(parseFloat(v))) addTransaction(emp, parseFloat(v)*emp.dailyRate, `إضافة ${v} أيام`)}} className="text-xs bg-blue-50 text-blue-600 py-2 rounded font-bold">+ أيام عمل</button>
                                     <button onClick={()=>{const v=prompt("حافز:"); if(v && !isNaN(parseFloat(v))) addTransaction(emp, parseFloat(v), "حافز")}} className="text-xs bg-green-50 text-green-600 py-2 rounded font-bold">حافز</button>
                                     <button onClick={()=>{const d=prompt("وصف الخصم:"); if(d){const cost=prompt("السعر:"); if(cost && !isNaN(parseFloat(cost))){const dmgs=[{date:new Date().toLocaleString(),desc:d,status:'resolved',cost:parseFloat(cost)},...(emp.damages||[])]; addTransaction(emp, -parseFloat(cost), `خصم: ${d}`); onUpdate(emp.id,{damages:dmgs});}}}} className="text-xs bg-red-100 text-red-700 py-2 rounded font-bold">+ خصم جديد</button>
-                                    <div className="col-span-2 flex gap-1"><button onClick={()=>{ if(confirm("تصفير؟")) onUpdate(emp.id, {currentBalance:0, lateCount:0, earlyLeaveCount:0, attendanceDays:0, damages:[], transactions:[], overtimeRequests:[]}); }} className="flex-1 text-xs bg-slate-800 text-white py-2 rounded font-bold">تصفير (قبض)</button><button onClick={()=>onDelete(emp.id)} className="px-3 text-xs bg-red-100 text-red-600 rounded font-bold">حذف</button></div>
+                                    <div className="col-span-2 flex gap-1"><button onClick={()=>{ if(confirm("تصفير؟")) onUpdate(emp.id, {currentBalance:0, lateCount:0, earlyLeaveCount:0, attendanceDays:0, damages:[], transactions:[], overtimeRequests:[], attendanceLog:[], absenceStart: tomorrowStr()}); }} className="flex-1 text-xs bg-slate-800 text-white py-2 rounded font-bold">تصفير (قبض)</button><button onClick={()=>onDelete(emp.id)} className="px-3 text-xs bg-red-100 text-red-600 rounded font-bold">حذف</button></div>
                                 </div>
                             </div>
                         )})}
@@ -881,6 +1025,36 @@
                         </div>
                     )}
 
+                    {absForId && (() => {
+                        const absEmp = users.find(u => u.id === absForId);
+                        if (!absEmp) return null;
+                        const list = calcAbsences(absEmp);
+                        return (
+                            <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4 z-50">
+                                <div className="bg-white w-full max-w-sm rounded-xl shadow-2xl p-4 max-h-[80vh] overflow-y-auto animate-fade-in">
+                                    <div className="flex justify-between items-center mb-3">
+                                        <h3 className="font-bold text-lg text-red-700">🚫 غياب: {absEmp.name}</h3>
+                                        <button onClick={()=>setAbsForId(null)} className="text-slate-500 text-2xl leading-none">×</button>
+                                    </div>
+                                    <p className="text-sm font-bold mb-3">إجمالي الغياب: <span className="text-red-600">{list.length} يوم</span></p>
+                                    {list.length === 0 ? (
+                                        <p className="text-sm text-slate-400 text-center py-6">لا توجد أيام غياب</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {list.slice().reverse().map(dt => (
+                                                <div key={dt} className="flex items-center justify-between gap-2 text-xs p-2 border rounded bg-red-50">
+                                                    <span className="font-bold text-slate-800">{dateLabel(dt)}</span>
+                                                    <button onClick={()=>excuseAbsence(absEmp, dt)} className="bg-white text-slate-600 border px-2 py-1 rounded text-[10px] font-bold">إلغاء الغياب</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <p className="text-[10px] text-slate-400 mt-3 text-center">الغياب = يوم شغل في الجدول من غير أي تسجيل حضور أو بديل. مفيش رصيد بيتضاف عن اليوم ده.</p>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {editingUser && (
                         <div className="fixed inset-0 modal-overlay flex items-center justify-center p-4">
                             <form onSubmit={saveEdit} className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl">
@@ -932,7 +1106,8 @@
                     {showReport && (() => {
                         const all = showReport.transactions || [];
                         const sum = (arr) => arr.reduce((s,t)=>s+Number(t.amount||0),0);
-                        const attendCount = Number(showReport.attendanceDays) || all.filter(t => t.note === 'راتب يومي').length || 0;
+                        const attendCount = Number(showReport.attendanceDays) || all.filter(t => isDailyPay(t.note)).length || 0;
+                        const absCount = calcAbsences(showReport).length;
                         const otItems = all.filter(t => /Overtime|over time|أوفر/i.test(t.note||''));
                         const otCount = (showReport.overtimeRequests||[]).filter(r=>r.status==='approved').length || otItems.length;
                         const addedItems = all.filter(t => /إضافة/.test(t.note||''));
@@ -954,6 +1129,7 @@
                                 <h3 className="text-center font-bold text-indigo-700 mb-1">{showReport.name}</h3>
                                 <div className="text-[11px] text-slate-500 mb-4 text-center">{new Date().toLocaleString()}</div>
                                 <Line label="إجمالي أيام الحضور" value={attendCount} extra="يوم" color="text-indigo-700" />
+                                <Line label="أيام الغياب" value={absCount} extra="يوم" color="text-red-600" />
                                 <Line label="Over Time" value={otCount} extra={`${sum(otItems).toFixed(0)} ج`} color="text-purple-700" />
                                 <Line label="أيام أضافها المدير" value={addedDays} extra={`${sum(addedItems).toFixed(0)} ج`} color="text-blue-700" />
                                 <Line label="الحوافز" value={`${sum(bonusItems).toFixed(0)} ج`} color="text-green-700" />
@@ -985,6 +1161,7 @@
 🗓️ ${new Date().toLocaleString()}
 ────────────────
 🗓️ إجمالي أيام الحضور: *${attendCount}* يوم
+🚫 أيام الغياب: *${absCount}* يوم
 ⏰ Over Time: *${otCount}*  |  ${sum(otItems).toFixed(0)} ج
 ➕ أيام أضافها المدير: *${addedDays}*  |  ${sum(addedItems).toFixed(0)} ج
 🎁 الحوافز: *${sum(bonusItems).toFixed(0)} ج*
